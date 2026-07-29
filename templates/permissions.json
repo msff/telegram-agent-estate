@@ -1,0 +1,73 @@
+{
+  "_comment": [
+    "Permission allowlist for GATEWAY TURNS ONLY (KTD12).",
+    "Passed via `claude -p --settings daemon/permissions.json` by turn_runner;",
+    "it is NOT .claude/settings.json, so it never affects your interactive",
+    "sessions in this repo.",
+    "",
+    "Why an allowlist instead of --dangerously-skip-permissions: a headless turn",
+    "cannot answer a prompt, and circuit-breaker prompts (rm -rf /) still fire",
+    "under bypass -- that would hang the turn forever while it holds the session",
+    "flock. bypass is also refused when running as root, which breaks portability",
+    "to other machines. Under dontAsk there are no prompts and no hang: anything",
+    "not allowed below fails the turn loudly, which is the behavior we want.",
+    "",
+    "VERIFIED 2026-07-28 against real turns. Two findings shaped these rules:",
+    "  (a) A command containing SHELL-VARIABLE EXPANSION is denied regardless of",
+    "      the allowlist -- the matcher cannot know what $PY expands to. CLAUDE.md",
+    "      therefore tells the brain to write this interpreter path literally.",
+    "  (b) The tilde form below matched a real invocation; the same rule written",
+    "      with the expanded /Users/... path did NOT. Keep the tilde form, and",
+    "      keep rule and command spelled the same way.",
+    "",
+    "HONEST SCOPE: this is not a sandbox. The brain legitimately runs inline",
+    "python (`python3 -c ...`), so allowing it is equivalent to allowing arbitrary",
+    "code. What this list actually buys: no prompts, no headless hang, portability",
+    "off this machine, and a deny-list for the few genuinely destructive verbs.",
+    "The real security boundary remains the owner-gated transport plus the",
+    "owner-allowlisted send path (U8), not this file.",
+    "",
+    "MAINTENANCE: a missing rule does NOT fail the turn -- verified 2026-07-28:",
+    "the turn exits 0 and the model narrates the denial. The turn runner therefore",
+    "treats send-evidence, not exit status, as delivery truth. The U11 parity suite",
+    "runs real turns and is the gate that proves this list complete.",
+    "",
+    "That gate earned its keep immediately: the rotation drill caught Edit being",
+    "allowed on session-handoff.md ALONE while Write was allowed on all of",
+    "state/** -- an arbitrary split, since the model picks Edit for a file that",
+    "already exists. The nightly flush edits an existing file, so the split would",
+    "eventually have silently dropped a night of context (rotation is silent, so",
+    "there is no send-evidence to catch it; rotate() now verifies the file's",
+    "mtime instead). Both verbs now cover state/**.",
+    "",
+    "Scope note: first-instance has no MCP servers -- the brain drives local",
+    "scripts. An instance that DOES use MCP adds e.g. \"mcp__whoop__*\"."
+  ],
+
+  "permissions": {
+    "defaultMode": "dontAsk",
+
+    "allow": [
+      "Read(./**)",
+
+      "Bash(~/.local/share/first-instance/venv/bin/python3 -c *)",
+      "Bash(~/.local/share/first-instance/venv/bin/python3 scripts/send_transaction.py *)",
+      "Bash(~/.local/share/first-instance/venv/bin/python3 scripts/msg_index.py *)",
+      "Bash(~/.local/share/first-instance/venv/bin/python3 scripts/reader_sync.py *)",
+      "Bash(~/.local/share/first-instance/venv/bin/python3 scripts/note_writer.py *)",
+      "Bash(~/.local/share/first-instance/venv/bin/python3 scripts/digest_compose.py *)",
+      "Bash(~/.local/share/first-instance/venv/bin/python3 scripts/auto_archive.py *)",
+
+      "Edit(./state/**)",
+      "Write(./state/**)"
+    ],
+
+    "deny": [
+      "Bash(rm *)",
+      "Bash(git push *)",
+      "Bash(curl *)",
+      "Read(./.env)",
+      "Read(~/.config/first-instance/env)"
+    ]
+  }
+}

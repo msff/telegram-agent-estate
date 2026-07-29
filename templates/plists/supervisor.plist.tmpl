@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Supervisor for instance {{name}}. Rendered from this template by the setup
+  skill; do not hand-edit the installed copy (regenerate instead).
+
+  INSTALL BY COPY, NEVER SYMLINK: `launchctl load` of a symlink whose target
+  lives in Dropbox fails with EIO on macOS 15. Re-copy after editing.
+
+  NO TELEGRAM_BOT_TOKEN HERE, deliberately. The token lives only in the
+  instance's token_file. Putting it in this env would leak it into every
+  `claude -p` turn, whose auto-loaded official telegram channel plugin would
+  then poll the same token and 409-war this instance's own poller.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{{label_prefix}}.{{name}}</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-l</string>
+    <string>-c</string>
+    <string>{{plugin_bin}}/supervisor.sh {{instance_config}}</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- The supervisor loop never exits on its own (there is no screen session
+       whose death ends it any more), so KeepAlive is purely a crash net. That
+       also means editing supervisor.sh requires a manual restart to take
+       effect — see the RUNBOOK. -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
+
+  <key>Nice</key>
+  <integer>10</integer>
+
+  <key>LowPriorityIO</key>
+  <true/>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>{{log_dir}}/launchd.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>{{log_dir}}/launchd.err.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>{{home}}</string>
+    <!-- /usr/sbin is load-bearing (ps/lsof live there and the process probes
+         depend on them). -->
+    <key>PATH</key>
+    <string>{{path}}</string>
+  </dict>
+</dict>
+</plist>

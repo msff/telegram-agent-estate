@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Scheduled job {{job}} for instance {{name}}. Rendered by the setup skill from
+  a `schedules:` entry in the instance config.
+
+  Fires `run-job`, which guards -> writes the lease -> appends a scheduler entry
+  to the receipt WAL -> drains synchronously. The guard exit codes are the
+  idempotency contract and are preserved exactly:
+      0 enqueued · 3 marker exists (already sent today) · 4 fresh lease (a send
+      is in flight) · 5 before the job's validity window.
+
+  StartCalendarInterval ONLY — NEVER KeepAlive on a scheduled job. KeepAlive
+  starts it at LOAD time and respawns it every ThrottleInterval; because the
+  guard window is lower-bound-only (--not-before), that fires the job off-window
+  and burns the day's marker, suppressing the real scheduled run. launchd fires
+  this at the scheduled time and once on wake if the mac slept through it; the
+  marker absorbs the wake duplicate. A failed run is NOT retried by launchd — it
+  self-heals at the next scheduled fire.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{{label_prefix}}.{{name}}-{{job}}</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-l</string>
+    <string>-c</string>
+    <string>{{plugin_bin}}/run-job.sh {{instance_config}} {{job}}</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+{{#weekday}}    <key>Weekday</key>
+    <integer>{{weekday}}</integer>
+{{/weekday}}    <key>Hour</key>
+    <integer>{{hour}}</integer>
+    <key>Minute</key>
+    <integer>{{minute}}</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>{{log_dir}}/job-{{job}}.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>{{log_dir}}/job-{{job}}.err.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>{{home}}</string>
+    <key>PATH</key>
+    <string>{{path}}</string>
+  </dict>
+</dict>
+</plist>

@@ -1,0 +1,24 @@
+{
+  "name": "telegram-agent-estate",
+  "version": "0.1.0",
+  "description": "Run a personal Claude agent as a Telegram-driven daemon: an owned long-poll receiver journals every inbound message to a durable receipt WAL, and a flock-serialized runner answers it with one `claude -p --resume` per turn. Crash-safe, exactly-once, subscription-billed. One plugin, many instances.",
+  "author": {
+    "name": "ms",
+    "email": "you@example.com"
+  },
+  "keywords": [
+    "telegram",
+    "daemon",
+    "launchd",
+    "agent",
+    "gateway",
+    "headless",
+    "wal"
+  ],
+  "tryAsking": [
+    "Set up a new Telegram agent instance for this repo",
+    "Why did my bot not answer the last message?",
+    "Run the parity suite against this instance",
+    "Add an MCP tool to this instance's permission allowlist"
+  ]
+}

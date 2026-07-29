@@ -1,0 +1,14 @@
+{
+  "name": "telegram-agent-estate",
+  "owner": {
+    "name": "ms",
+    "url": "https://github.com/msff"
+  },
+  "plugins": [
+    {
+      "name": "telegram-agent-estate",
+      "source": "./",
+      "description": "Run a personal Claude agent as a Telegram-driven daemon: receipt WAL in, one `claude -p --resume` per turn out. Crash-safe, exactly-once, subscription-billed."
+    }
+  ]
+}
