@@ -1489,6 +1489,14 @@ def compact_wal():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="U6/U7 turn runner (see docstring)")
+    # Same purpose as the poller's: both instances run THIS file, so a
+    # supervisor checking `pgrep -f "turn_runner.py drain"` for its own drain
+    # would see its neighbour's and skip — quietly, every tick, for as long as
+    # the other instance stays busy. The tag makes the probe instance-specific.
+    parser.add_argument("--instance", default=None, metavar="NAME",
+                        help="instance name; must match the loaded config")
+    parser.add_argument("--config", default=None, metavar="PATH",
+                        help=f"instance YAML (default: ${instance_config.CONFIG_ENV})")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("drain", help="drain the inbound WAL under the session lock")
     p_rot = sub.add_parser(
@@ -1520,6 +1528,19 @@ def main(argv=None):
         p.add_argument("--silent", action="store_true")
 
     args = parser.parse_args(argv)
+    if args.config:
+        os.environ[instance_config.CONFIG_ENV] = str(args.config)
+    try:
+        c = cfg()
+    except instance_config.ConfigError as exc:
+        log(f"turn_runner: {exc}", err=True)
+        return 2
+    if args.instance and args.instance != c.name:
+        log(f"turn_runner: --instance={args.instance} does not match the loaded "
+            f"config ({c.name} from {c.source}) — refusing to run under a "
+            f"confused identity", err=True)
+        return 2
+
     if args.command == "drain":
         summary = drain()
         log(f"turn_runner: drain {summary}")
