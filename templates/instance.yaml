@@ -1,0 +1,169 @@
+# Instance config for telegram-agent-estate.
+#
+# ONE plugin, MANY instances. Everything that differs between two bots living on
+# the same mac is declared here; nothing about an instance may be hardcoded in
+# bin/. Copy this file to the instance's own config location (see `install` in
+# the setup skill) and fill it in.
+#
+# The fields below are not a wish list — each one exists because something broke
+# without it. The comments say which.
+
+# --- identity ---------------------------------------------------------------
+
+# Short slug. EVERYTHING namespaced derives from it: launchd labels, lock file
+# names, state dir, log dir, process-match patterns. Two instances that share a
+# prefix will sweep and kill each other's processes, which is the single most
+# dangerous class of bug in a multi-instance estate (R5/R18).
+name: first-instance
+
+# Human label used in owner-facing alerts ("⚠️ <label> could not process …").
+label: First Instance
+
+# The repo the agent thinks in: its CLAUDE.md, its scripts, its state/.
+# `claude -p --resume` is scoped to this cwd, so it is also what keeps two
+# instances' session histories apart.
+workdir: /Users/example/projects/first-instance
+
+# Interpreter for this instance's helpers. MUST be an absolute path to a venv
+# OUTSIDE any synced folder (Dropbox/iCloud/Drive corrupt venvs, and a synced
+# lock file is not a lock). Never `python3` and never a shell variable — a
+# command containing shell-variable expansion is DENIED under `dontAsk`
+# regardless of the allowlist, because the matcher cannot know what it expands
+# to (verified 2026-07-28).
+python: /Users/example/.local/share/first-instance/venv/bin/python3
+
+# --- transport --------------------------------------------------------------
+
+telegram:
+  # The ONLY chat allowed to reach the agent, and the only one it may send to.
+  # Enforced at both edges: the poller drops non-owner updates before spending
+  # any network on them, and the send path refuses any other chat id.
+  owner_chat_id: 10000000001
+
+  # File holding TELEGRAM_BOT_TOKEN=… , chmod 600, outside the repo.
+  # The token must NEVER reach a turn's environment: the official telegram
+  # channel plugin auto-loads in every claude session and will start polling any
+  # token it finds, which 409-wars this instance's own poller.
+  token_file: ~/.config/first-instance/env
+
+  # Blank-.env directory handed to that channel plugin so it finds no token and
+  # exits. Passed into turns via env passthrough — without it a turn falls back
+  # to the DEFAULT channel state dir, which on a multi-instance mac belongs to
+  # the OTHER instance and holds ITS token.
+  channel_state_dir: ~/.claude/channels/telegram-reading
+
+# --- runtime ----------------------------------------------------------------
+
+runtime:
+  # Non-synced state root: receipt WAL, drain lock, session map, dead-letter,
+  # scheduler counter, cli-version stamp, turns-held flag.
+  state_dir: ~/.local/state/first-instance
+
+  # Where daemon.log / poller.log / drain.log go.
+  log_dir: ~/.claude/channels/telegram-reading
+
+  # A = headless `claude -p --resume` (default, subscription-billed today).
+  # B = interactive-session driver (the standing fallback if the paused
+  #     Agent-SDK billing split ever un-pauses). KTD11: B is permanent, not a
+  #     NO-GO-only path.
+  backend: A
+
+  # Per-turn wall-clock budgets, SECONDS.
+  #
+  # Do not copy these from a synthetic benchmark. The reading instance shipped
+  # with 300s, derived from a spike that measured ~6s warm turns, and the first
+  # live scheduled digest timed out twice and dead-lettered — real composition
+  # work took 7m26s. Size these against the instance's HEAVIEST real job, then
+  # add margin. A conversational turn and a digest have genuinely different
+  # shapes, hence two numbers.
+  turn_timeout: 900
+  job_timeout: 1800
+
+  # Defer scheduled turns at/above this fraction of the 5-hour usage window so
+  # automation never silently spills into paid overflow credits. Deferred work
+  # stays pending in the WAL and self-heals when the window recovers.
+  quota_defer_at: 0.90
+
+  # Attempts BEYOND the first before an entry is dead-lettered and the owner
+  # alerted. 1 = try, retry once, park.
+  max_retries: 1
+
+# --- permission posture (KTD12) ---------------------------------------------
+
+permissions:
+  # dontAsk + an explicit allowlist. NOT bypassPermissions: circuit-breaker
+  # prompts still fire under bypass and a headless turn cannot answer one, so it
+  # blocks forever WHILE HOLDING THE DRAIN LOCK — a gateway-wide deadlock rather
+  # than one lost turn. bypass is also refused as root and needs a one-time
+  # interactive acceptance, so it is not portable to a fresh machine.
+  mode: dontAsk
+
+  # Instance's allowlist, copied from templates/permissions.json at install and
+  # then EDITED to name this instance's real tools. Passed via `--settings`.
+  # Deliberately NOT .claude/settings.json — that would silently change the
+  # user's interactive sessions in the same repo.
+  settings_file: /Users/example/projects/first-instance/daemon/permissions.json
+
+# Extra environment variables a turn may inherit. The runner sanitizes the
+# child environment down to an allowlist, because turns otherwise inherit every
+# API key in the login shell. Name the ones THIS instance's MCP servers need.
+# ANTHROPIC_API_KEY is dropped unconditionally and cannot be re-added here —
+# that would move billing off the subscription (KTD1).
+env_passthrough:
+  - TELEGRAM_STATE_DIR
+
+# --- schedules --------------------------------------------------------------
+#
+# Rendered into launchd plists. StartCalendarInterval ONLY — never KeepAlive on
+# a scheduled job: KeepAlive starts it at LOAD time and respawns it every
+# ThrottleInterval, which fires the job off-window and burns the day's marker,
+# suppressing the real scheduled run.
+#
+# `not_before` is the guard's lower bound: it suppresses a past-midnight wake
+# catch-up from consuming the new day's marker.
+# `silent` jobs must not push to Telegram (the rotation flush is one).
+
+schedules:
+  - job: morning-digest
+    hour: 9
+    minute: 0
+    not_before: "06:00"
+    prompt_file: templates/prompts/morning.txt
+
+  - job: evening-triage
+    hour: 20
+    minute: 30
+    not_before: "17:00"
+    prompt_file: templates/prompts/evening.txt
+
+  - job: weekly-reflection
+    weekday: 0          # 0 = Sunday
+    hour: 11
+    minute: 0
+    not_before: "08:00"
+    prompt_file: templates/prompts/weekly.txt
+
+# --- housekeeping -----------------------------------------------------------
+
+housekeeping:
+  # Daily window, wall-clock checked by the supervisor loop — NOT
+  # StartCalendarInterval, which silently skips when the mac is asleep and does
+  # not catch up. Fires on the first loop pass after this hour when the stamp is
+  # older than today.
+  hour: 3
+
+  # Rotation: one silent flush turn distils the session into the handoff file,
+  # then the session id is dropped so the next turn re-bootstraps from that
+  # file. This is what bounds transcript growth to a day.
+  #
+  # The flush turn is SILENT, so it leaves no send-evidence — the runner
+  # verifies it by the handoff file's mtime instead. A denied Edit exits 0, so
+  # trusting the exit code here silently discards a day of context every night.
+  handoff_file: state/session-handoff.md
+
+  # Extra per-instance maintenance run inside the same window (optional).
+  script: scripts/housekeeping.py
+
+  # Truncate these when they exceed the cap (in-place: writers hold O_APPEND
+  # fds, so `mv` would strand them).
+  log_cap_bytes: 2097152

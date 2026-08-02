@@ -2,7 +2,15 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .DS_Store
-# instance artifacts must never land in the plugin repo
+# A filled-in instance config carries an owner chat id, absolute home paths, and
+# the location of a bot-token file. None of that belongs in a shared repo.
 *instance.yaml
+
+# ...but the glob above also swallowed the one file that MUST ship: the template
+# every instance is copied from, and where each field's rationale is recorded.
+# It sat untracked and invisible to `git status` from U12 until U13 (2026-08-02),
+# one `rm` away from taking the design notes with it.
+!templates/instance.yaml
+
 env
 permissions.local.json
