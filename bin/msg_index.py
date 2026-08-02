@@ -81,7 +81,7 @@ def _parse_ts(ts):
 
 # --- writers ------------------------------------------------------------------
 
-def append_raw(chat_id, message_id, text, path=None, meta=None):
+def append_raw(chat_id, message_id, text, path=None, meta=None, cfg=None):
     """Transport-side: journal every outbound message at send time.
 
     `meta` (optional dict) is merged into the record — the send transaction
@@ -92,10 +92,10 @@ def append_raw(chat_id, message_id, text, path=None, meta=None):
     rec = dict(meta or {})
     rec.update({"type": "raw", "chat_id": chat_id, "message_id": message_id,
                 "text": text, "ts": _now_iso()})
-    append_jsonl(index_path(path), rec)
+    append_jsonl(index_path(path, cfg), rec)
 
 
-def annotate(chat_id, message_id, blocks, path=None):
+def annotate(chat_id, message_id, blocks, path=None, cfg=None):
     """Session-side: record block→document char ranges for a sent chunk.
 
     Validated loudly at write time: a malformed annotation would not fail
@@ -111,14 +111,14 @@ def annotate(chat_id, message_id, blocks, path=None):
             raise ValueError(f"annotation block has invalid range {start}..{end}: {b}")
         checked.append({"start": start, "end": end,
                         "reader_id": b["reader_id"], "title": b["title"]})
-    append_jsonl(index_path(path), {
+    append_jsonl(index_path(path, cfg), {
         "type": "annotation", "chat_id": chat_id, "message_id": message_id,
         "blocks": checked, "ts": _now_iso()})
 
 
 # --- readers ------------------------------------------------------------------
 
-def get_message(chat_id, message_id, path=None):
+def get_message(chat_id, message_id, path=None, cfg=None):
     """Merged view {"text", "blocks"} of one sent message, or None.
 
     Last record of each type wins: a resumed send transaction (R20) may
@@ -126,7 +126,7 @@ def get_message(chat_id, message_id, path=None):
     """
     text = None
     blocks = None
-    for row in read_jsonl(index_path(path)):
+    for row in read_jsonl(index_path(path, cfg)):
         if row.get("chat_id") != chat_id or row.get("message_id") != message_id:
             continue
         if row.get("type") == "raw":
@@ -281,7 +281,7 @@ def _fuzzy_resolve(chat_id, quote_text, path):
 
 
 def resolve(chat_id, replied_message_id=None, quote_text=None,
-            quote_position=None, path=None):
+            quote_position=None, path=None, cfg=None):
     """Resolve a reply/quote-reply to a document. Returns
     {"status": "resolved"|"ambiguous"|"unresolved",
      "reader_id", "title", "candidates": [{"reader_id","title"}...]}.
@@ -294,7 +294,7 @@ def resolve(chat_id, replied_message_id=None, quote_text=None,
       3. no exact match (paraphrase, or reply to an unindexed message) →
          fuzzy across the chat's recent indexed blocks.
     """
-    path = index_path(path)
+    path = index_path(path, cfg)
     if quote_text:
         # The plugin fork HTML-escapes quote_text (escapeMeta — untrusted
         # inbound data) before it reaches the session, while the journal
@@ -302,7 +302,7 @@ def resolve(chat_id, replied_message_id=None, quote_text=None,
         # like with like — otherwise any quote with an apostrophe (&#39;)
         # silently degrades to fuzzy.
         quote_text = html.unescape(quote_text)
-    msg = (get_message(chat_id, replied_message_id, path=path)
+    msg = (get_message(chat_id, replied_message_id, path=path, cfg=cfg)
            if replied_message_id is not None else None)
 
     if msg and msg["blocks"]:
@@ -384,7 +384,7 @@ def prune(retention_days=None, path=None, cfg=None):
     return dropped
 
 
-def drift_report(path=None):
+def drift_report(path=None, cfg=None):
     """Raw sends from the last 48h with no annotation, as
     [{"chat_id","message_id"}...] in send order.
 
@@ -395,7 +395,7 @@ def drift_report(path=None):
     """
     cutoff = datetime.now() - timedelta(hours=DRIFT_WINDOW_HOURS)
     seen, order, annotated = set(), [], set()
-    for row in read_jsonl(index_path(path)):
+    for row in read_jsonl(index_path(path, cfg)):
         key = (row.get("chat_id"), row.get("message_id"))
         if row.get("type") == "raw":
             ts = _parse_ts(row.get("ts"))

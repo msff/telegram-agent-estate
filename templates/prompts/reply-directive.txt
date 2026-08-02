@@ -1,0 +1,1 @@
+(Ответ отправь в Telegram, chat_id={chat_id}.)

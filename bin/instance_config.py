@@ -208,6 +208,34 @@ class InstanceConfig:
     def env_passthrough(self):
         return list(self._data.get("env_passthrough") or ())
 
+    # --- prompts -------------------------------------------------------------
+
+    @property
+    def prime_prompt_file(self):
+        """Override for the session-bootstrap prompt; None uses the plugin's."""
+        p = _dig(self._data, "prompts.prime")
+        return _expand(p) if p else None
+
+    @property
+    def flush_prompt_file(self):
+        """Override for the rotation flush prompt; None uses the plugin's."""
+        p = _dig(self._data, "prompts.flush")
+        return _expand(p) if p else None
+
+    @property
+    def silent_directive_file(self):
+        """Prefix for a scheduled job that must NOT push to Telegram."""
+        p = _dig(self._data, "prompts.silent_directive")
+        return _expand(p) if p else None
+
+    @property
+    def reply_directive_file(self):
+        """Prefix telling a scheduled job where to reply. A scheduled prompt
+        arrives with no Telegram metadata of its own, so without this the turn
+        does the work and has nowhere to send it."""
+        p = _dig(self._data, "prompts.reply_directive")
+        return _expand(p) if p else None
+
     # --- housekeeping --------------------------------------------------------
 
     @property
