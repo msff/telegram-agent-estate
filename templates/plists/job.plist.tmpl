@@ -12,8 +12,13 @@
 
   StartCalendarInterval ONLY — NEVER KeepAlive on a scheduled job. KeepAlive
   starts it at LOAD time and respawns it every ThrottleInterval; because the
-  guard window is lower-bound-only (--not-before), that fires the job off-window
-  and burns the day's marker, suppressing the real scheduled run. launchd fires
+  guard window is lower-bound-only (the not_before setting), that fires the job
+  off-window and burns the day's marker, suppressing the real scheduled run.
+
+  Note: no double hyphen may appear anywhere in these comments — it is illegal
+  inside an XML comment. plutil and launchd both tolerate it, so the live
+  reading-morning plist carried one for weeks; a strict parser (python's expat)
+  does not, which is how it was found. launchd fires
   this at the scheduled time and once on wake if the mac slept through it; the
   marker absorbs the wake duplicate. A failed run is NOT retried by launchd — it
   self-heals at the next scheduled fire.

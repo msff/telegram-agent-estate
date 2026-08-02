@@ -13,14 +13,14 @@ TWO MODES.
       tests/` runs on every change, and it is what catches a regression in the
       WAL / coalescing / retry / dead-letter logic.
 
-  real  (READING_PARITY_REAL=1) — the same scenarios drive actual `claude -p`
+  real  (ESTATE_PARITY_REAL=1) — the same scenarios drive actual `claude -p`
       turns under the real permission allowlist, and the ones that only mean
       something end-to-end (session recall across a restart, recall across a
       rotation, CLAUDE.md freshness) unskip. ~12 turns, a few minutes, real
       tokens, and REAL TELEGRAM MESSAGES to the owner chat — every one prefixed
       `[PARITY]` so they are obviously drills. Run it deliberately:
 
-          READING_PARITY_REAL=1 venv/bin/python3 -m pytest tests/test_gateway_parity.py -q -s
+          ESTATE_PARITY_REAL=1 venv/bin/python3 -m pytest tests/test_gateway_parity.py -q -s
 
 Fast mode cannot prove the allowlist is complete — a missing rule only shows up
 when a real turn tries the real command. That is precisely why real mode exists
@@ -28,7 +28,7 @@ and why KTD12 names this suite as the allowlist's gate.
 
 ISOLATION. Both modes run against a tmp gateway state dir, so a parity run never
 touches the live WAL or session map. In real mode the tmp dirs are handed to the
-turn's subprocess through READING_ENV_PASSTHROUGH — the env sanitizer (U8r)
+turn's subprocess through ESTATE_ENV_PASSTHROUGH — the env sanitizer (U8r)
 drops everything it is not told to keep, so without that passthrough a real turn
 would journal its send into the LIVE msg-index and the send-evidence check would
 read the wrong file. That is the one piece of wiring real mode needs.
@@ -43,30 +43,66 @@ from types import SimpleNamespace
 
 import pytest
 
+import instance_config
 import msg_index
 import turn_runner as tr
 
 OWNER = 10000000001
-WORKDIR = Path(__file__).resolve().parent.parent
-REAL = os.environ.get("READING_PARITY_REAL") == "1"
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+BIN = PLUGIN_ROOT / "bin"
+REAL = os.environ.get("ESTATE_PARITY_REAL") == "1"
 real_only = pytest.mark.skipif(
-    not REAL, reason="needs real claude turns: READING_PARITY_REAL=1")
+    not REAL, reason="needs real claude turns: ESTATE_PARITY_REAL=1")
 
 
 # --- harness ----------------------------------------------------------------
 
+def write_parity_instance(tmp_path, live=None):
+    """A throwaway instance rooted in tmp.
+
+    In REAL mode it inherits the LIVE instance's workdir, permissions and MCP
+    config — the turn has to run against the real CLAUDE.md and the real
+    allowlist, since proving the allowlist complete is the entire reason real
+    mode exists — but its STATE roots stay in tmp so a drill never touches the
+    live WAL, session map, or handoff.
+    """
+    import sys, yaml
+    (tmp_path / "state").mkdir(parents=True, exist_ok=True)
+    workdir = str(live.workdir) if live else str(tmp_path)
+    data = {
+        "name": "parity", "label": "Parity Drill",
+        "workdir": workdir, "python": sys.executable,
+        "telegram": {"owner_chat_id": OWNER,
+                     "token_file": str(live.token_file) if live else str(tmp_path / "env")},
+        "runtime": {"state_dir": str(tmp_path), "log_dir": str(tmp_path / "logs")},
+        "env_passthrough": ["TELEGRAM_STATE_DIR", "ESTATE_GATEWAY_STATE_DIR"],
+    }
+    if live is not None and live.permission_settings:
+        data["permissions"] = {"mode": live.permission_mode,
+                               "settings_file": str(live.permission_settings)}
+        if live.mcp_config:
+            data["permissions"]["mcp_config"] = str(live.mcp_config)
+    p = tmp_path / "parity-instance.yaml"
+    p.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return p
+
+
 @pytest.fixture
 def gw(tmp_path, monkeypatch):
     """A private gateway + state root for one scenario."""
-    monkeypatch.setenv("FIRST_INSTANCE_GATEWAY_STATE_DIR", str(tmp_path))
-    monkeypatch.setenv("FIRST_INSTANCE_STATE_DIR", str(tmp_path / "state"))
+    live = None
     if REAL:
-        # The turn's subprocess inherits only what the sanitizer is told to
-        # keep; without this the real turn's `reply` would journal into the live
-        # index and the send-evidence check would look in the wrong place.
-        monkeypatch.setenv(
-            "READING_ENV_PASSTHROUGH",
-            "FIRST_INSTANCE_GATEWAY_STATE_DIR,FIRST_INSTANCE_STATE_DIR")
+        # Real mode needs the live instance's brain and allowlist; see above.
+        live = instance_config.load(os.environ["ESTATE_PARITY_LIVE_CONFIG"]) \
+            if os.environ.get("ESTATE_PARITY_LIVE_CONFIG") else None
+    monkeypatch.setenv(instance_config.CONFIG_ENV,
+                       str(write_parity_instance(tmp_path, live)))
+    # The gateway root is ALSO exported so a real turn's child process resolves
+    # the same tmp state the assertions read; without it the turn's `reply`
+    # journals into the live index and the send-evidence check looks in the
+    # wrong place.
+    monkeypatch.setenv("ESTATE_GATEWAY_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(tr, "HANDOFF_PATH", None)
     return tmp_path
 
 
@@ -78,7 +114,7 @@ def block(text, mid):
 def fake_invoker(session_id="parity-sess", reply="ok", record=None, sends=True,
                  fail_first=0):
     """Fast-mode stand-in for `claude -p`: succeeds, and mirrors a real turn by
-    stamping the send journal with READING_TURN_ID (which is what the runner
+    stamping the send journal with ESTATE_TURN_ID (which is what the runner
     reads as delivery truth). `fail_first` makes the first N calls fail."""
     state = {"n": 0}
 
@@ -89,7 +125,7 @@ def fake_invoker(session_id="parity-sess", reply="ok", record=None, sends=True,
         if state["n"] <= fail_first:
             return SimpleNamespace(returncode=1, stdout="", stderr="boom")
         if sends:
-            tid = os.environ.get("READING_TURN_ID")
+            tid = os.environ.get("ESTATE_TURN_ID")
             if tid:
                 msg_index.append_raw(OWNER, 9000 + state["n"], reply,
                                      meta={"turn_id": tid})
@@ -107,7 +143,7 @@ def invoker(**kw):
 
 
 def _raw_rows():
-    from reader_client import read_jsonl
+    from estate_client import read_jsonl
     return [r for r in read_jsonl(msg_index.index_path())
             if r.get("type") == "raw"]
 
@@ -327,7 +363,7 @@ def test_8_a_failing_turn_retries_once_then_alerts(gw):
         return SimpleNamespace(returncode=1, stdout="", stderr="parity: forced")
 
     s = tr.drain(invoker=always_fails, alert=alerts.append, probe=_no_probe)
-    assert len(calls) == tr.MAX_RETRIES + 1
+    assert len(calls) == tr.max_retries() + 1
     assert s["dead_letter"] == 1
     assert alerts and "dead-letter" in alerts[0]
     assert tr.pending_entries() == [], "a poison entry must stop blocking"
@@ -340,7 +376,7 @@ def test_8b_a_turn_that_exits_zero_without_sending_is_not_accepted(gw):
     calls = []
     s = tr.drain(invoker=fake_invoker(record=calls, sends=False),
                  alert=_silent, probe=_no_probe)
-    assert len(calls) == tr.MAX_RETRIES + 1
+    assert len(calls) == tr.max_retries() + 1
     assert s["dead_letter"] == 1
 
 
@@ -381,27 +417,35 @@ def test_10_the_gateway_never_reaches_across_instances(gw, tmp_path):
     for p in (tr.wal_path(), tr.lock_path(), tr.session_map_path(),
               tr.dead_letter_path()):
         assert str(p).startswith(str(tmp_path)), p
-    # 2. process identity: our supervisor greps a repo-scoped path, so second-instance's
-    #    poller (bun server.ts) can never match and vice versa.
-    daemon_sh = (WORKDIR / "daemon" / "daemon.sh").read_text(encoding="utf-8")
-    assert "telegram_poll.py" in daemon_sh
-    assert "bun server.ts" not in daemon_sh
+    # 2. process identity. Under the plugin BOTH instances run the same
+    #    bin/poller.py, so a path-keyed probe matches both and one supervisor's
+    #    restart reaps the other's poller. Every probe must key on the instance
+    #    tag instead.
+    sup = (BIN / "supervisor.sh").read_text(encoding="utf-8")
+    assert 'pgrep -f "poller.py.*$TAG"' in sup, "poller probe is not tag-scoped"
+    assert '$TAG.*drain' in sup, "drain probe is not tag-scoped"
+    assert "bun server.ts" not in sup
     # 3. outbound: the send path refuses any chat but the owner's.
-    import send_transaction
-    assert send_transaction._allowed_chat_ids() == {OWNER}
+    import send as send_mod
+    assert send_mod.allowed_chat_ids() == {OWNER}
     # 4. the auto-loading telegram channel plugin: it loads inside every turn's
-    #    claude, and its DEFAULT state dir is second-instance's — whose .env holds
-    #    second-instance's token. The supervisor must point it at this instance's blank
-    #    .env and pass that pointer through the env sanitizer, or a turn could
-    #    end up polling the other instance's bot.
-    assert 'TELEGRAM_STATE_DIR="$LOGDIR"' in daemon_sh
-    assert "TELEGRAM_STATE_DIR" in daemon_sh.split(
-        "READING_ENV_PASSTHROUGH=")[1].splitlines()[0]
-    assert (WORKDIR.parent / ".." ).exists()   # sanity: WORKDIR resolved
+    #    claude, and its DEFAULT state dir belongs to whichever instance was
+    #    installed first — whose .env holds THAT instance's token. The
+    #    supervisor must point it at this instance's blank .env, and the runner
+    #    must pass that pointer through the env sanitizer, or a turn could end
+    #    up polling the other bot.
+    assert 'TELEGRAM_STATE_DIR="$CHANNEL_STATE_DIR"' in sup
+    # ...and the runner really does forward it (config-driven passthrough).
+    mp = pytest.MonkeyPatch()
+    mp.setenv("TELEGRAM_STATE_DIR", "/tmp/parity-channel-dir")
+    try:
+        assert tr._child_env().get("TELEGRAM_STATE_DIR") == "/tmp/parity-channel-dir"
+    finally:
+        mp.undo()
     # and the sanitizer really does drop everything else
     monkey = pytest.MonkeyPatch()
     monkey.setenv("TELEGRAM_BOT_TOKEN", "second-instance-token-must-not-leak")
-    monkey.setenv("READING_ENV_PASSTHROUGH", "TELEGRAM_STATE_DIR")
+    monkey.setenv("ESTATE_ENV_PASSTHROUGH", "TELEGRAM_STATE_DIR")
     monkey.setenv("TELEGRAM_STATE_DIR", "/blank/dir")
     try:
         env = tr._child_env()
@@ -430,7 +474,7 @@ def test_11_a_poison_entry_does_not_block_the_queue(gw):
         seen.append(argv[2])
         if "poison" in argv[2]:
             return SimpleNamespace(returncode=1, stdout="", stderr="poisoned")
-        tid = os.environ.get("READING_TURN_ID")
+        tid = os.environ.get("ESTATE_TURN_ID")
         if tid:
             msg_index.append_raw(OWNER, 7000 + state["n"], "ok",
                                  meta={"turn_id": tid})
@@ -466,25 +510,26 @@ def test_supervisor_and_wrappers_are_wired_to_the_gateway():
     """Guards the cutover itself: the shell layer must drive the runner, not the
     screen. These are the four edits that make the gateway live, and a silent
     revert of any of them is the kind of thing nothing else would catch."""
-    daemon_sh = _code(WORKDIR / "daemon" / "daemon.sh")
-    assert "turn_runner.py" in daemon_sh, "supervisor never drains the WAL"
-    assert "rotate" in daemon_sh, "the 03:00 window no longer rotates"
-    assert "screen -L -dmS" not in daemon_sh, "still spawning a screen session"
-    assert "inject.sh" not in daemon_sh, "still injecting into a screen session"
-    for name in ("morning.sh", "evening.sh", "weekly.sh"):
-        text = _code(WORKDIR / "daemon" / name)
-        assert "run-job" in text, f"{name} still fires through the old path"
-        assert "inject.sh" not in text, f"{name} still injects"
+    sup = _code(BIN / "supervisor.sh")
+    assert "turn_runner.py" in sup, "supervisor never drains the WAL"
+    assert "housekeeping.sh" in sup, "supervisor never runs the daily window"
+    assert "screen -L -dmS" not in sup, "still spawning a screen session"
+    assert "inject.sh" not in sup, "still injecting into a screen session"
+    hk = _code(BIN / "housekeeping.sh")
+    assert "rotate" in hk, "the daily window no longer rotates"
+    job = _code(BIN / "run-job.sh")
+    assert "run-job" in job, "the job wrapper no longer drives the runner"
+    assert "inject.sh" not in job, "the job wrapper still injects"
 
 
 def test_cli_version_tripwire_records_the_running_version():
     """CLI churn is a live risk (U5's --resume semantics have no stability
     contract and the CLI self-updates). The supervisor must notice a version
     change and hold turns until the suite re-passes."""
-    daemon_sh = _code(WORKDIR / "daemon" / "daemon.sh")
-    assert "--version" in daemon_sh
-    assert "cli-version" in daemon_sh
-    assert "turns-held" in daemon_sh, "nothing sets the hold flag"
+    sup = _code(BIN / "supervisor.sh")
+    assert "--version" in sup
+    assert "cli-version" in sup
+    assert "turns-held" in sup, "nothing sets the hold flag"
     # ...and the runner must actually honour it, or the hold is decorative.
     import inspect
     assert "turns_held()" in inspect.getsource(tr.drain)

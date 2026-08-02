@@ -64,8 +64,17 @@ def _expand(value):
     Config files are written by hand and `~/.config/...` is the natural way to
     write a home-relative path. Left unexpanded it becomes a literal `./~`
     directory next to the working dir — a silent, wrong, and writable path.
+
+    SYMLINKS ARE DELIBERATELY NOT FOLLOWED. This used `Path.resolve()` until the
+    U14 cutover, where it took the live instance down: a venv's `bin/python3` is
+    a symlink to the real interpreter, so resolving it yielded the SYSTEM python
+    — which has none of the venv's packages. The poller crash-looped on
+    `ModuleNotFoundError: No module named 'telegram'` while the drain, which
+    imports nothing extra, kept working and made the stack look half-healthy.
+    `abspath` normalises `..` lexically and leaves the symlink alone, which is
+    what a venv shim needs to stay a venv shim.
     """
-    return Path(os.path.expandvars(os.path.expanduser(str(value)))).resolve()
+    return Path(os.path.abspath(os.path.expandvars(os.path.expanduser(str(value)))))
 
 
 class InstanceConfig:
@@ -264,6 +273,38 @@ class InstanceConfig:
     @property
     def log_cap_bytes(self):
         return int(_dig(self._data, "housekeeping.log_cap_bytes") or 2_097_152)
+
+    @property
+    def handoff_snapshot_pattern(self):
+        """Regex matching a retirable `## ` section header in THIS instance's
+        handoff. Default is reading's `## Current state (as of ...)`.
+
+        Instance-specific because the handoff is written by the agent in its own
+        idiom, and the two existing instances disagree completely: reading
+        prepends `## Current state (as of 2026-08-02 ...)`, second-instance writes
+        `## Чт 23.07 — утренний бриф отправлен ...`. A prune hardcoded to one
+        shape silently no-ops on the other — which is what happened to second-instance,
+        whose handoff reached 2366 lines (past the 2000-line single-Read
+        ceiling, so recovery was reading a truncated head) while every prune
+        reported a clean `noop`.
+        """
+        return (_dig(self._data, "housekeeping.handoff_snapshot_pattern")
+                or r"^##\s+(?:Current|Earlier)\s+state\b")
+
+    @property
+    def handoff_order(self):
+        """How to rank snapshots when deciding which to retire.
+
+        `date` (default) reads an `as of YYYY-MM-DD` out of the header, so a
+        hand-edit that moves a block cannot retire the newest state. `file`
+        trusts newest-first file order, which is what a handoff whose headers
+        carry no parseable year has to fall back on.
+        """
+        v = (_dig(self._data, "housekeeping.handoff_order") or "date").lower()
+        if v not in ("date", "file"):
+            raise ConfigError(
+                f"housekeeping.handoff_order must be 'date' or 'file', got {v!r}")
+        return v
 
     @property
     def msg_index_retention_days(self):

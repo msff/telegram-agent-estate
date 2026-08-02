@@ -714,11 +714,21 @@ ENV_BASE_KEYS = ("HOME", "PATH", "USER", "SHELL", "LOGNAME", "LANG", "LC_ALL",
                  "TMPDIR", "TERM", "TZ", "SSH_AUTH_SOCK", "XDG_CONFIG_HOME")
 
 
-def _child_env():
-    """The sanitized environment for a turn subprocess."""
+def _child_env(config=None):
+    """The sanitized environment for a turn subprocess.
+
+    Passthrough keys come from the INSTANCE CONFIG first, then the environment.
+    The config half is load-bearing rather than tidy: TELEGRAM_STATE_DIR is what
+    points a turn's auto-loading telegram channel plugin at THIS instance's
+    (deliberately blank) channel dir. Without it the plugin falls back to the
+    default channel state dir, which on a multi-instance mac belongs to whichever
+    instance was installed first and holds ITS token — so the turn would start
+    polling the other bot's token and 409-war its live poller.
+    """
     env = {k: v for k, v in os.environ.items() if k in ENV_BASE_KEYS}
-    extra = os.environ.get("ESTATE_ENV_PASSTHROUGH", "")
-    for key in (k.strip() for k in extra.split(",")):
+    keys = list((config or cfg()).env_passthrough)
+    keys += [k.strip() for k in os.environ.get("ESTATE_ENV_PASSTHROUGH", "").split(",")]
+    for key in keys:
         if key and key in os.environ:
             env[key] = os.environ[key]
     # The retry-safety anchor must reach the turn (and the send primitive it
@@ -1250,18 +1260,34 @@ def _annotate_budget(summary, *, peak_lines, kept_lines):
 
 
 def prune_handoff(path=None, *, keep_snapshots=None, log_tail_bytes=None,
-                  archive_dir=None, dry_run=False):
-    """Retire superseded `## Current state` snapshots and over-long log tails to
-    an archive file, leaving the live handoff small enough to read in one call.
+                  archive_dir=None, dry_run=False, config=None,
+                  snapshot_pattern=None, order=None):
+    """Retire superseded state snapshots and over-long log tails to an archive
+    file, leaving the live handoff small enough to read in one call.
+
+    WHAT COUNTS AS A SNAPSHOT IS PER INSTANCE. The agent writes its handoff in
+    its own idiom and the two instances disagree entirely — reading prepends
+    `## Current state (as of 2026-08-02 ...)`, second-instance writes
+    `## Чт 23.07 — утренний бриф ...`. A hardcoded pattern no-ops silently on
+    the other shape, which is exactly what happened: second-instance's handoff reached
+    2366 lines, past the 2000-line single-Read ceiling, so every recovery was
+    reading a truncated head while each nightly prune reported a clean `noop`.
 
     Ordering matters at the call site: prune BEFORE the flush turn, so the turn
     reads a compact file — and capture the flush's `before` stamp AFTER, or the
     prune's own write is indistinguishable from the flush's and rotate() reports
     flushed=True for a turn that wrote nothing.
     """
-    path = Path(path) if path else handoff_path()
+    try:
+        c = config or cfg()
+    except instance_config.ConfigError:
+        c = None                       # explicit-path callers need no instance
+    path = Path(path) if path else handoff_path(c)
     keep = HANDOFF_KEEP_SNAPSHOTS if keep_snapshots is None else keep_snapshots
     tail_budget = HANDOFF_LOG_TAIL_BYTES if log_tail_bytes is None else log_tail_bytes
+    snap_re = re.compile(snapshot_pattern or (
+        c.handoff_snapshot_pattern if c else r"^##\s+(?:Current|Earlier)\s+state\b"))
+    order = order or (c.handoff_order if c else "date")
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -1271,18 +1297,23 @@ def prune_handoff(path=None, *, keep_snapshots=None, log_tail_bytes=None,
     before_lines = len(text.splitlines())
     preamble, sections = _split_sections(text)
 
-    # Snapshots are newest-first in practice, but rank by the header's own date
-    # rather than trusting file order — a hand-edit that moves a block must not
-    # silently retire the newest state. Undated headers are never dropped.
-    dated = []
+    # Rank the retirable sections. `date` reads the header's own `as of` date
+    # rather than trusting file order, so a hand-edit that moves a block cannot
+    # silently retire the newest state; undated headers are never dropped.
+    # `file` trusts newest-first file order, which is the only option for a
+    # handoff whose headers carry no parseable year (second-instance's `## Чт 23.07 —`).
+    ranked = []
     for i, sec in enumerate(sections):
-        if not _SNAPSHOT_RE.match(sec[0]):
+        if not snap_re.match(sec[0]):
             continue
-        m = _AS_OF_RE.search(sec[0])
-        if m:
-            dated.append((m.group(1), -i, i))
-    dated.sort(reverse=True)
-    doomed = {i for _, _, i in dated[keep:]}
+        if order == "file":
+            ranked.append((-i, -i, i))          # earlier in file == newer
+        else:
+            m = _AS_OF_RE.search(sec[0])
+            if m:
+                ranked.append((m.group(1), -i, i))
+    ranked.sort(reverse=True)
+    doomed = {i for _, _, i in ranked[keep:]}
 
     kept_lines, archived = list(preamble), []
     for i, sec in enumerate(sections):

@@ -52,6 +52,7 @@ def build_instance(root, name, chat):
         "telegram": {"owner_chat_id": chat, "token_file": str(root / "env"),
                      "channel_state_dir": str(root / "chan")},
         "runtime": {"state_dir": str(root / "gw"), "log_dir": str(root / "logs")},
+        "env_passthrough": ["TELEGRAM_STATE_DIR"],
         "schedules": [{"job": "morning-digest", "hour": 9, "minute": 0,
                        "prompt_file": "prompts/job.txt"}],
     }
@@ -293,6 +294,13 @@ def test_installer_renders_valid_plists_for_both_instances(pair, tmp_path):
     for p in agents.glob("*.plist"):
         lint = subprocess.run(["plutil", "-lint", str(p)], capture_output=True, text=True)
         assert lint.returncode == 0, f"{p.name}: {lint.stdout}{lint.stderr}"
+        # plutil is LENIENT and launchd is too, so neither catches a `--` inside
+        # an XML comment — which is illegal, and which the live reading-morning
+        # plist carried for weeks unnoticed. Parse strictly as well, so any
+        # tooling that uses a real XML parser keeps working.
+        import plistlib
+        with open(p, "rb") as fh:
+            plistlib.load(fh)
         # A scheduled job must never carry KeepAlive: launchd would start it at
         # LOAD time and respawn it every ThrottleInterval, firing it off-window
         # and burning the day's marker so the real scheduled run no-ops.
@@ -300,3 +308,37 @@ def test_installer_renders_valid_plists_for_both_instances(pair, tmp_path):
             ka = subprocess.run(["plutil", "-extract", "KeepAlive", "raw", str(p)],
                                 capture_output=True, text=True)
             assert ka.returncode != 0, f"{p.name} carries KeepAlive"
+
+
+# --- 9. the turn environment ---------------------------------------------------
+
+def test_turn_env_carries_this_instances_channel_state_dir(pair, monkeypatch):
+    """TELEGRAM_STATE_DIR must reach the turn, and must be THIS instance's.
+
+    A turn's auto-loading telegram channel plugin polls whatever token it finds
+    in the channel state dir it is pointed at. Unset, it falls back to the
+    machine default — which belongs to whichever instance was installed first
+    and holds ITS token. The turn would then poll the other bot's token and
+    409-war its live poller. Config-driven passthrough is what prevents it.
+    """
+    a, b = pair
+    monkeypatch.setenv("TELEGRAM_STATE_DIR", str(a.channel_state_dir))
+    monkeypatch.setenv(instance_config.CONFIG_ENV, str(a.source))
+
+    env = tr._child_env(a)
+    assert env.get("TELEGRAM_STATE_DIR") == str(a.channel_state_dir)
+    assert env["TELEGRAM_STATE_DIR"] != str(b.channel_state_dir)
+
+
+def test_turn_env_never_carries_the_bot_token_or_an_api_key(pair, monkeypatch):
+    """Two hard exclusions: the bot token would arm the channel plugin inside
+    the turn's own process, and an API key would move billing off the
+    subscription onto metered credits (KTD1)."""
+    a, _ = pair
+    monkeypatch.setenv(instance_config.CONFIG_ENV, str(a.source))
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "should-not-propagate")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "should-not-propagate")
+
+    env = tr._child_env(a)
+    assert "TELEGRAM_BOT_TOKEN" not in env
+    assert "ANTHROPIC_API_KEY" not in env
