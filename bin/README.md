@@ -1,41 +1,69 @@
-# `bin/` — intentionally empty until U13
+# `bin/` — the shared executable stack
 
-The executable stack (supervisor, poller, turn runner, guard, housekeeping) is
-**not** vendored here yet. It currently lives in the first-instance repo at
-`daemon/` and is still the live code for that instance.
+Transplanted from `first-instance/daemon/` at U13 (2026-08-02) and
+parameterized by the instance config. **Nothing here may hardcode an
+instance-specific string.**
 
-## Why it was not copied during U12
-
-Copying it now would fork code that is demonstrably still settling. The reading
-cutover (2026-07-28) changed the shape four times in its first hours of real
-load:
-
-- per-turn timeouts were wrong by an order of magnitude and had to be split by
-  source;
-- the poller-liveness probe was wrong twice, in opposite directions;
-- bot initialization needed a retry that the poll loop's handler never saw;
-- the startup orphan sweep had to be deleted outright.
-
-None of those were reachable from tests. A copy taken before the soak week would
-have to absorb every one of those fixes twice, by hand, with the two copies
-silently diverging in between — which is exactly the failure mode a shared
-plugin exists to prevent.
-
-## What lands here in U13
-
-Transplanted from `first-instance/daemon/`, parameterized by the instance
-config (`templates/instance.yaml`) so that nothing instance-specific remains:
-
-| file | from | must stop hardcoding |
+| file | from | notes |
 |---|---|---|
-| `supervisor.sh` | `daemon/daemon.sh` | workdir, log dir, poller path, owner chat, label prefix |
-| `poller.py` | `daemon/telegram_poll.py` | workdir, config path, token file, inbox dir |
-| `turn_runner.py` | `daemon/turn_runner.py` | state dir, timeouts, permissions path, handoff path, prompts |
-| `guard.py` | part of `scripts/send_transaction.py` | marker/lease/payload roots |
-| `housekeeping.sh` | the 03:00 block of `daemon.sh` | which extra script to run, log caps |
-| `install-instance.sh` | *new* | renders `templates/plists/*.tmpl`, copies (never symlinks) |
-| `parity.sh` | wraps `tests/test_gateway_parity.py` | workdir, instance config |
+| `instance_config.py` | *new* | the seam; everything else reads paths through it |
+| `estate_client.py` | `scripts/reader_client.py` (generic half) | logging, state roots, JSONL journals, conflict guard |
+| `msg_index.py` | `scripts/msg_index.py` | message→document index + send journal |
+| `turn_runner.py` | `daemon/turn_runner.py` | receipt WAL, coalescing, retry, rotation, handoff prune |
+| `poller.py` | `daemon/telegram_poll.py` | owned long-poll receiver |
+| `guard.py` | `scripts/send_transaction.py` (scheduling half) | markers, leases, payloads, the guard |
+| `send.py` | `scripts/send_transaction.py` (send half) | one message, journaled, owner-only |
+| `supervisor.sh` | `daemon/daemon.sh` (loop) | poller health, drain backstop, CLI tripwire |
+| `housekeeping.sh` | `daemon/daemon.sh` (03:00 block) | rotation, log caps, inbox sweep |
+| `run-job.sh` | `daemon/inject.sh --job` | one scheduled job; guard exit codes preserved |
+| `install-instance.sh` | *new* | renders plists, copies (never symlinks) |
+| `parity.sh` | *new* | wraps `tests/test_gateway_parity.py` per instance |
 
-The gating rule for U13: **every string in the table's right-hand column must
-come from the instance config, and two mock instances must run side by side
-without their sweeps, locks, or probes crossing.**
+What did NOT come over, and should not: the Readwise API client, the digest
+transaction (chunked resume, tag swaps, Reader links), and anything else that is
+a *reading* concern rather than a *gateway* one.
+
+## The rule this directory exists to enforce
+
+Before the plugin, two instances were two checkouts, so isolation was free —
+every path and every `pgrep` pattern differed by construction. **Consolidation
+destroys that and hands back the obligation to manufacture it.** Both instances
+now execute these exact files.
+
+So:
+
+- **Never match a process on a path under `bin/`.** Always match the
+  `--instance=<name>` tag (`InstanceConfig.poller_match()`). A path-keyed probe
+  matches every instance, which turns "restart my poller" into "kill my
+  neighbour's".
+- **Never resolve a path from `__file__`.** That yields the shared plugin
+  directory, not the caller's workdir.
+- **Never cache the config in a module global.** An import-time constant cannot
+  follow an environment override — that is exactly how a plain `pytest tests/`
+  pruned the live handoff file on 2026-07-31.
+- **Never default to a shared location.** Prefer a hard error: an instance that
+  cannot identify itself would otherwise inherit another's state dir and token.
+
+`tests/test_two_instances.py` is the gate. It builds two complete instances side
+by side and asserts nothing crosses — markers, leases, locks, WALs, session
+maps, journals, handoffs, outbound allowlists, launchd labels, and process
+probes. Add to it whenever you add shared state.
+
+## Running one instance by hand
+
+```sh
+export ESTATE_INSTANCE_CONFIG=~/.config/<name>/instance.yaml
+
+bin/supervisor.sh   "$ESTATE_INSTANCE_CONFIG"          # the daemon (launchd does this)
+bin/housekeeping.sh "$ESTATE_INSTANCE_CONFIG"          # force the daily window now
+bin/run-job.sh      "$ESTATE_INSTANCE_CONFIG" morning-digest
+bin/parity.sh       "$ESTATE_INSTANCE_CONFIG" [--real]
+bin/install-instance.sh "$ESTATE_INSTANCE_CONFIG" [--dry-run] [--no-load]
+
+bin/turn_runner.py --instance=<name> drain
+bin/turn_runner.py --instance=<name> prune-handoff --dry-run
+bin/guard.py guard <job>            # exit: 0 run · 3 marker · 4 lease · 5 too early
+```
+
+`--instance` is cross-checked against the loaded config; a mismatch exits 2
+rather than running under a confused identity.
