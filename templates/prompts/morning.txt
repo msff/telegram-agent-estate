@@ -1,0 +1,7 @@
+[SCHEDULED morning-brief] Write today's brief for the owner.
+
+Pull this instance's own data sources for what changed since yesterday, name
+what is on for today, and end with the single thing worth doing first. If a
+source is unavailable, say so plainly instead of guessing around it.
+
+Keep it short enough to read on a phone, and send it as your reply.

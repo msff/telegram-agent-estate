@@ -1,1 +1,1 @@
-(Служебная задача) Начинается новая сессия. Сначала прочитай {handoff}, чтобы восстановить контекст разговора, затем ответь на сообщение(я) ниже.
+(System task) A new session is starting. First read {handoff} to restore the context of the conversation, then answer the message(s) below.

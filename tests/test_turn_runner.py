@@ -348,8 +348,13 @@ def test_second_drain_is_busy_while_lock_held(gw):
 
 # --- U7: session map + bootstrap priming ------------------------------------
 
-PRIME_MARK = "Начинается новая сессия"   # unique to PRIME_PREFIX
-FLUSH_MARK = "ротируется"                # unique to FLUSH_PROMPT
+# Phrases unique to the shipped default prompts. They moved to English in U2:
+# the Russian set is still shipped, as templates/prompts/examples/ru/, but a
+# public plugin whose DEFAULT prime prompt is in a language the installer does
+# not read degrades the one turn that restores context — silently, since that
+# failure leaves no other trace.
+PRIME_MARK = "A new session is starting"   # unique to PRIME_PREFIX
+FLUSH_MARK = "session is rotating"         # unique to FLUSH_PROMPT
 
 
 def test_bootstrap_primes_first_turn_then_persists_session(gw):
@@ -812,7 +817,7 @@ def test_silent_job_renders_the_no_reply_directive(gw):
     calls = []
     tr.drain(invoker=ok_invoker(record=calls), alert=silent, probe=no_probe)
     prompt = calls[0][2]
-    assert "НЕ отправляй" in prompt            # silent directive
+    assert "do NOT send anything to Telegram" in prompt   # silent directive
     assert "chat_id=" not in prompt            # and NOT the reply directive
 
 

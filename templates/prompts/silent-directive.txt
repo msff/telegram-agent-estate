@@ -1,1 +1,1 @@
-(Служебная задача — ничего НЕ отправляй в Telegram.)
+(System task — do NOT send anything to Telegram.)

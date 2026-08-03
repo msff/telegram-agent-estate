@@ -1,1 +1,1 @@
-(Служебная задача — ничего НЕ отправляй в Telegram.) Обнови {handoff} всем важным из этой сессии (планы, решения, состояние). Сессия сейчас ротируется — контекст переживёт только то, что попадёт в файл.
+(System task — do NOT send anything to Telegram.) Update {handoff} with everything that matters from this session: plans, decisions, current state. The session is rotating now — only what lands in that file survives.

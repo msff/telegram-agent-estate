@@ -1,23 +1,61 @@
 # Prompt templates
 
-The two prompts the RUNNER itself issues, as opposed to the scheduled-job
-prompts named by `schedules[].prompt_file` in the instance config.
+<!-- shipped-prompt-language: en -->
 
-| file | when it fires | must not |
-|---|---|---|
-| `prime.txt` | first turn of a session (fresh start, or after a rotation dropped the id) | — |
-| `flush.txt` | the silent rotation turn, before the session id is dropped | send anything to Telegram |
+Everything shipped in this directory (outside `examples/`) is **English**. The
+marker above is machine-readable and `tests/test_templates.py` asserts the files
+match it — see "Language" below for why that is a test and not a preference.
 
-`{handoff}` is substituted with the instance's handoff file, relative to its
-workdir. **Keep the placeholder.** A prompt naming a path literally will, on an
-instance configured with a different handoff location, tell the model to read a
-file that does not exist — and the turn then exits 0 having restored nothing.
-That failure is invisible from the outside: the session looks alive, answers
-normally, and has simply forgotten everything. The whole point of the mtime
-check in `rotate()` is that this class of failure leaves no other trace.
+## The four the runner issues
 
-These ship in Russian because the first two instances think in Russian. An
-instance whose brain works in another language should point
-`prompts.prime`/`prompts.flush` at its own files — translating is not optional
-polish, since a prompt in the wrong language degrades the turn that restores
-context.
+These fire from the runner itself, not from a schedule. Each is overridable per
+instance via `prompts.*` in the instance config; unset uses the file here.
+
+| file | config key | when it fires | must not |
+|---|---|---|---|
+| `prime.txt` | `prompts.prime` | first turn of a session (fresh start, or after a rotation dropped the id) | — |
+| `flush.txt` | `prompts.flush` | the silent rotation turn, before the session id is dropped | send anything to Telegram |
+| `silent-directive.txt` | `prompts.silent_directive` | prefix on a scheduled job marked `silent: true` | send anything to Telegram |
+| `reply-directive.txt` | `prompts.reply_directive` | prefix on every other scheduled job | — |
+
+`{handoff}` (prime, flush) is substituted with the instance's handoff file,
+relative to its workdir; `{chat_id}` (reply directive) with the owner chat.
+**Keep the placeholders.** A prompt naming a path literally will, on an instance
+configured with a different handoff location, tell the model to read a file that
+does not exist — and the turn then exits 0 having restored nothing. That failure
+is invisible from the outside: the session looks alive, answers normally, and
+has simply forgotten everything. The whole point of the mtime check in
+`rotate()` is that this class of failure leaves no other trace.
+
+## The three schedule starters
+
+`morning.txt`, `evening.txt` and `weekly.txt` back the three example schedules in
+`templates/instance.yaml`. They are **starters, not defaults** — they say nothing
+about what your agent actually does, and they are meant to be replaced.
+
+Two ways to replace them, and the second is the one to prefer:
+
+- edit them here — but the plugin directory is upgraded underneath you, so an
+  edit here is lost on the next update;
+- copy them into the instance (`<workdir>/prompts/…` or `~/.config/<name>/…`)
+  and point `schedules[].prompt_file` at your copy. `run-job.sh` resolves a
+  relative `prompt_file` against the workdir first and the plugin second, so
+  your copy wins by existing.
+
+Delete the schedules you do not want rather than leaving them pointed at a
+prompt file that is not there: a missing `prompt_file` exits the job with
+status 2, on the schedule, forever, and only the job's log says so.
+
+## Language
+
+The shipped set is English because a public plugin cannot assume its installer's
+language. `examples/ru/` holds a Russian translation of the four runner prompts,
+kept as a worked example of an override rather than as a fallback.
+
+If your agent thinks in another language, translate the four and point
+`prompts.*` at your files. This is **not optional polish**: a prompt in the
+wrong language degrades the one turn whose entire job is restoring context, and
+that degradation leaves no trace anywhere else. There is a second, smaller
+reason the first instances wrote theirs in Cyrillic on purpose: a prompt that
+shares no tokens with the ASCII strings the tests assert on cannot be confused
+with them.

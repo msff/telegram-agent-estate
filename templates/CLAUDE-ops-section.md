@@ -3,9 +3,21 @@
   bits. It tells the brain how it is being driven — which changes what it can
   assume about its own lifetime, and what "reply" even means.
 
+  Keep the BEGIN/END markers. The setup skill inserts and re-inserts this block
+  between them, so an upgrade replaces the block instead of appending a second
+  copy — and anything you write OUTSIDE them is yours and is never touched.
+  Edits INSIDE the markers are overwritten on the next insertion.
+
+  Bracketed placeholders to substitute:
+    [ABSOLUTE_PYTHON_PATH]  the instance's venv interpreter, literally
+    [ESTATE_BIN]            the directory this plugin's executables run from
+    [HANDOFF_FILE]          housekeeping.handoff_file, relative to the workdir
+
   Keep it accurate rather than short: every paragraph here replaced a wrong
   assumption that cost a real incident.
 -->
+
+<!-- BEGIN telegram-agent-estate:ops -->
 
 ## How you are running
 
@@ -27,10 +39,16 @@ on:
 result goes nowhere. To speak to the user you must run:
 
 ```
-[ABSOLUTE_PYTHON_PATH] scripts/send_transaction.py reply --text "…"
+[ABSOLUTE_PYTHON_PATH] [ESTATE_BIN]/send.py "your message text"
 ```
 
-Write that interpreter path **literally**. A command containing a shell variable
+The message text is the one positional argument — quote it, and send one
+message per call. There is a `--chat-id` flag and you will never need it: it
+defaults to the owner chat, and any other chat id is refused before the send
+happens. Splitting a long answer across two or three calls reads better on a
+phone and gives each part its own notification.
+
+Write the interpreter path **literally**. A command containing a shell variable
 (`$PY`) is denied before it runs — the permission matcher cannot know what the
 variable expands to.
 
@@ -76,3 +94,5 @@ fresh from that file.
 file actually changing, so a turn that writes nothing is flagged as a failure —
 if there is genuinely nothing to add, say so in the file rather than skipping
 the write.
+
+<!-- END telegram-agent-estate:ops -->

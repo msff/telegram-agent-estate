@@ -1,9 +1,14 @@
-# Instance config for telegram-agent-estate.
+# Instance config for telegram-agent-estate — TEMPLATE, not a working config.
 #
 # ONE plugin, MANY instances. Everything that differs between two bots living on
 # the same mac is declared here; nothing about an instance may be hardcoded in
-# bin/. Copy this file to the instance's own config location (see `install` in
-# the setup skill) and fill it in.
+# the plugin's code. Copy this file to the instance's own config location (see
+# `install` in the setup skill) and replace every placeholder.
+#
+# Placeholders use `my-agent` / `My Agent` / `com.example` / `0`. None of them
+# work as shipped: an unedited config installs launchd jobs under a reserved
+# example domain and talks to chat id 0, which no human owns. That is
+# deliberate — a template that half-works is a template that ships unedited.
 #
 # The fields below are not a wish list — each one exists because something broke
 # without it. The comments say which.
@@ -14,23 +19,33 @@
 # names, state dir, log dir, process-match patterns. Two instances that share a
 # prefix will sweep and kill each other's processes, which is the single most
 # dangerous class of bug in a multi-instance estate (R5/R18).
-name: first-instance
+name: my-agent
 
 # Human label used in owner-facing alerts ("⚠️ <label> could not process …").
-label: First Instance
+label: My Agent
+
+# Reverse-domain prefix for this instance's launchd labels and plist filenames:
+# <launchd_prefix>.<name>.plist plus one <launchd_prefix>.<name>-<job>.plist per
+# schedule. REPLACE IT with your own reverse domain or handle. Left as shipped,
+# every install on every machine lands under the same reserved example domain —
+# and `install-instance.sh`'s clobber check, which scans for
+# "<launchd_prefix>.<name>*", stops being able to tell two people's jobs apart.
+launchd_prefix: com.example
 
 # The repo the agent thinks in: its CLAUDE.md, its scripts, its state/.
 # `claude -p --resume` is scoped to this cwd, so it is also what keeps two
 # instances' session histories apart.
-workdir: /Users/example/projects/first-instance
+workdir: ~/projects/my-agent
 
-# Interpreter for this instance's helpers. MUST be an absolute path to a venv
+# Interpreter for this instance's helpers. MUST be an absolute path (or a `~`
+# path, expanded the same way by the code and by the shell bootstrap) to a venv
 # OUTSIDE any synced folder (Dropbox/iCloud/Drive corrupt venvs, and a synced
-# lock file is not a lock). Never `python3` and never a shell variable — a
-# command containing shell-variable expansion is DENIED under `dontAsk`
+# lock file is not a lock). Never a bare `python3` and never a shell variable —
+# a command containing shell-variable expansion is DENIED under `dontAsk`
 # regardless of the allowlist, because the matcher cannot know what it expands
-# to (verified 2026-07-28).
-python: /Users/example/.local/share/first-instance/venv/bin/python3
+# to (verified 2026-07-28). Must also be written on ONE line: the shell entry
+# points read this single value with sed, so a folded YAML scalar is unreadable.
+python: ~/.local/share/my-agent/venv/bin/python3
 
 # --- transport --------------------------------------------------------------
 
@@ -38,29 +53,33 @@ telegram:
   # The ONLY chat allowed to reach the agent, and the only one it may send to.
   # Enforced at both edges: the poller drops non-owner updates before spending
   # any network on them, and the send path refuses any other chat id.
-  owner_chat_id: 10000000001
+  #
+  # A numeric id, not a @username. Message the bot once and read the id from
+  # https://api.telegram.org/bot<TOKEN>/getUpdates. 0 is a placeholder that
+  # matches nobody: the bot ignores every message until you replace it.
+  owner_chat_id: 0
 
   # File holding TELEGRAM_BOT_TOKEN=… , chmod 600, outside the repo.
   # The token must NEVER reach a turn's environment: the official telegram
   # channel plugin auto-loads in every claude session and will start polling any
   # token it finds, which 409-wars this instance's own poller.
-  token_file: ~/.config/first-instance/env
+  token_file: ~/.config/my-agent/env
 
   # Blank-.env directory handed to that channel plugin so it finds no token and
   # exits. Passed into turns via env passthrough — without it a turn falls back
   # to the DEFAULT channel state dir, which on a multi-instance mac belongs to
-  # the OTHER instance and holds ITS token.
-  channel_state_dir: ~/.claude/channels/telegram-reading
+  # the OTHER instance and holds ITS token. Keep the instance name in the path.
+  channel_state_dir: ~/.claude/channels/telegram-my-agent
 
 # --- runtime ----------------------------------------------------------------
 
 runtime:
   # Non-synced state root: receipt WAL, drain lock, session map, dead-letter,
   # scheduler counter, cli-version stamp, turns-held flag.
-  state_dir: ~/.local/state/first-instance
+  state_dir: ~/.local/state/my-agent
 
   # Where daemon.log / poller.log / drain.log go.
-  log_dir: ~/.claude/channels/telegram-reading
+  log_dir: ~/.local/state/my-agent/logs
 
   # A = headless `claude -p --resume` (default, subscription-billed today).
   # B = interactive-session driver (the standing fallback if the paused
@@ -70,12 +89,12 @@ runtime:
 
   # Per-turn wall-clock budgets, SECONDS.
   #
-  # Do not copy these from a synthetic benchmark. The reading instance shipped
-  # with 300s, derived from a spike that measured ~6s warm turns, and the first
-  # live scheduled digest timed out twice and dead-lettered — real composition
-  # work took 7m26s. Size these against the instance's HEAVIEST real job, then
-  # add margin. A conversational turn and a digest have genuinely different
-  # shapes, hence two numbers.
+  # Do not copy these from a synthetic benchmark. The first instance shipped
+  # with 300s, derived from a spike that measured ~6s warm turns, and its first
+  # live scheduled digest timed out twice and dead-lettered — the real
+  # composition work took 7m26s. Size these against the instance's HEAVIEST real
+  # job, then add margin. A conversational turn and a digest have genuinely
+  # different shapes, hence two numbers.
   turn_timeout: 900
   job_timeout: 1800
 
@@ -98,19 +117,60 @@ permissions:
   # interactive acceptance, so it is not portable to a fresh machine.
   mode: dontAsk
 
-  # Instance's allowlist, copied from templates/permissions.json at install and
-  # then EDITED to name this instance's real tools. Passed via `--settings`.
+  # This instance's allowlist, copied from templates/permissions.json at install
+  # and then EDITED to name this instance's real tools. Passed via `--settings`.
   # Deliberately NOT .claude/settings.json — that would silently change the
   # user's interactive sessions in the same repo.
-  settings_file: /Users/example/projects/first-instance/daemon/permissions.json
+  settings_file: ~/.config/my-agent/permissions.json
+
+  # Optional: this instance's own MCP config, applied with --strict-mcp-config
+  # so turns see THESE servers and nothing else. Both flags or neither —
+  # `--mcp-config` alone MERGES with the user-scope config and would add servers
+  # rather than replace them. An MCP diet is worth real latency (~11s a turn on
+  # the first instance), but note the failure mode: a server missing from this
+  # file is invisible to the turn, and `dontAsk` gates MCP tools too, so a
+  # scheduled job can exit 0 having silently done nothing.
+  #
+  # Unset uses the machine's full MCP config. A path that does not exist is
+  # treated the same way — losing a server the brain needs is a worse failure
+  # than a slow turn.
+  mcp_config:      # e.g. ~/.config/my-agent/mcp-config.json
 
 # Extra environment variables a turn may inherit. The runner sanitizes the
 # child environment down to an allowlist, because turns otherwise inherit every
-# API key in the login shell. Name the ones THIS instance's MCP servers need.
+# credential in the login shell. Name the ones THIS instance's MCP servers need.
 # ANTHROPIC_API_KEY is dropped unconditionally and cannot be re-added here —
 # that would move billing off the subscription (KTD1).
+#
+# TELEGRAM_STATE_DIR is the one entry that is not really optional: it is what
+# points a turn's auto-loading telegram channel plugin at the blank
+# `channel_state_dir` above instead of the machine default, which on a
+# multi-instance mac holds the OTHER instance's token.
 env_passthrough:
   - TELEGRAM_STATE_DIR
+
+# --- runner prompts ---------------------------------------------------------
+#
+# The four prompts the RUNNER itself issues, as opposed to the scheduled-job
+# prompts named by `schedules[].prompt_file` below. Leave each one unset to use
+# the plugin's shipped English default from templates/prompts/; point it at a
+# file of your own to override.
+#
+# Override them when the agent thinks in another language: a prompt in the wrong
+# language degrades the very turn that restores context, and that failure is
+# invisible from the outside — the session looks alive, answers normally, and
+# has simply forgotten everything. templates/prompts/examples/ru/ is a
+# translated set to copy and adapt.
+#
+# Paths must be absolute or `~`-relative — these are NOT resolved against the
+# workdir. `{handoff}` (prime, flush) and `{chat_id}` (reply directive) are
+# substituted into the text; keep the placeholders.
+
+prompts:
+  prime:            # first turn of a session — reads the handoff back in
+  flush:            # the silent rotation turn that writes the handoff
+  silent_directive: # prefix for a job that must NOT push to Telegram
+  reply_directive:  # prefix telling a job where to reply
 
 # --- schedules --------------------------------------------------------------
 #
@@ -121,16 +181,23 @@ env_passthrough:
 #
 # `not_before` is the guard's lower bound: it suppresses a past-midnight wake
 # catch-up from consuming the new day's marker.
-# `silent` jobs must not push to Telegram (the rotation flush is one).
+# `silent: true` marks a job that must not push to Telegram at all.
+#
+# `prompt_file` resolves instance-relative first (against `workdir`), then
+# plugin-relative — so `templates/prompts/morning.txt` below is the shipped
+# starter prompt, while `prompts/morning.txt` would be your own copy inside the
+# workdir. A `prompt_file` that resolves to nothing exits the job with status 2,
+# so delete the schedules this instance does not want rather than leaving them
+# pointing at prompts you have not written.
 
 schedules:
-  - job: morning-digest
+  - job: morning-brief
     hour: 9
     minute: 0
     not_before: "06:00"
     prompt_file: templates/prompts/morning.txt
 
-  - job: evening-triage
+  - job: evening-review
     hour: 20
     minute: 30
     not_before: "17:00"
@@ -156,13 +223,45 @@ housekeeping:
   # then the session id is dropped so the next turn re-bootstraps from that
   # file. This is what bounds transcript growth to a day.
   #
+  # A relative path is resolved against `workdir` on purpose: the handoff is the
+  # agent's own memory and lives in the repo it thinks in, not in the non-synced
+  # state dir.
+  #
   # The flush turn is SILENT, so it leaves no send-evidence — the runner
   # verifies it by the handoff file's mtime instead. A denied Edit exits 0, so
   # trusting the exit code here silently discards a day of context every night.
   handoff_file: state/session-handoff.md
 
+  # Regex matching a retirable `## ` section header in THIS instance's handoff.
+  # Instance-specific because the handoff is written by the agent in its own
+  # idiom, and two agents rarely agree: one prepends `## Current state (as of
+  # 2026-08-02 …)`, another writes one dated log entry per day. A prune
+  # hardcoded to one shape silently no-ops on the other — which is how one live
+  # handoff reached 2366 lines, past the 2000-line single-Read ceiling (so
+  # recovery was reading a truncated head), while every prune reported a clean
+  # `noop`.
+  #
+  # Unset uses the default `^##\s+(?:Current|Earlier)\s+state\b`. A dated-log
+  # handoff needs its own, e.g. '^##\s+\S+\s+\d{2}\.\d{2}\b'. Single-quote it,
+  # or YAML will eat the backslashes.
+  handoff_snapshot_pattern:
+
+  # How to rank snapshots when deciding which to retire.
+  # `date` (default) reads an `as of YYYY-MM-DD` out of the header, so a
+  # hand-edit that moves a block cannot retire the newest state. `file` trusts
+  # newest-first file order, which is what a handoff whose headers carry no
+  # parseable year has to fall back on.
+  handoff_order: date
+
+  # How long the send journal keeps records. This is delivery EVIDENCE, not chat
+  # history: it is how a retry decides whether a message already went out. Too
+  # short and a retry re-sends; the floor is however long a dead-lettered entry
+  # can sit before someone looks at it.
+  msg_index_retention_days: 60
+
   # Extra per-instance maintenance run inside the same window (optional).
-  script: scripts/housekeeping.py
+  # Relative to `workdir`. Unset means no extra script.
+  script:          # e.g. scripts/housekeeping.py
 
   # Truncate these when they exceed the cap (in-place: writers hold O_APPEND
   # fds, so `mv` would strand them).
