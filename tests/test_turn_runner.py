@@ -1222,3 +1222,53 @@ def test_rotate_touches_only_its_own_instance(gw, tmp_path, monkeypatch):
         monkey.undo()
 
     assert (victim.read_text(encoding="utf-8"), victim.stat().st_mtime_ns) == before
+
+
+def test_a_successful_scheduled_job_writes_its_completion_marker(gw, tmp_path):
+    """The marker is a scheduled job's completion truth: guard() reads it to
+    refuse a duplicate, and reconciliation reads it to prove the job finished.
+
+    second-instance's jobs reply through the plain send primitive rather than a digest
+    transaction, so nothing wrote one — observed live 2026-08-02, when the 20:00
+    post-ride check delivered its brief and left no evidence it had run. A
+    wake-triggered re-fire would then have sent the same brief twice."""
+    import guard as guard_mod
+    from datetime import datetime
+
+    tr.enqueue_job("postride-check", "check the ride", chat_id=OWNER,
+                   guard_fn=FakeGuard(0), lease_writer=lambda j: None)
+    today = datetime.now().strftime("%Y-%m-%d")
+    assert not guard_mod.marker_path("postride-check", today).exists()
+
+    tr.drain(invoker=ok_invoker(), alert=silent, probe=no_probe)
+
+    marker = guard_mod.marker_path("postride-check", today)
+    assert marker.exists(), "a delivered scheduled job left no completion marker"
+    assert guard_mod.guard("postride-check") == guard_mod.GUARD_MARKER
+
+
+def test_a_failed_scheduled_job_writes_no_marker(gw, tmp_path):
+    """The inverse, and the reason this is not written at enqueue time: a job
+    that never delivered must stay re-runnable."""
+    import guard as guard_mod
+    from datetime import datetime
+
+    tr.enqueue_job("postride-check", "check the ride", chat_id=OWNER,
+                   guard_fn=FakeGuard(0), lease_writer=lambda j: None)
+    # exits 0 but sends nothing — the runner treats that as failure
+    tr.drain(invoker=ok_invoker(sends=False), alert=silent, probe=no_probe)
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    assert not guard_mod.marker_path("postride-check", today).exists()
+
+
+def test_a_conversational_turn_writes_no_marker(gw, tmp_path):
+    """Only scheduler entries carry a job identity; a chat reply must not stamp
+    one (there is no job to mark, and a stray marker would suppress a real
+    scheduled run later that day)."""
+    import guard as guard_mod
+    tr.journal_inbound(1, "message", OWNER, block("hi", 1))
+    tr.drain(invoker=ok_invoker(), alert=silent, probe=no_probe)
+    markers = list((tr.cfg().agent_state_dir / "markers").glob("*")) \
+        if (tr.cfg().agent_state_dir / "markers").exists() else []
+    assert markers == []

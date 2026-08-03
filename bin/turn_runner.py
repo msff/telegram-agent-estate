@@ -813,6 +813,49 @@ def run_turn(prompt, head, *, backend=None, invoker=None,
     raise ValueError(f"unknown runner_backend {backend!r}")
 
 
+def _write_job_marker(group):
+    """Stamp today's completion marker for a scheduler entry that just succeeded.
+
+    The marker is a scheduled job's completion truth: `guard()` reads it to
+    refuse a duplicate run, and reconciliation reads it to prove a job finished
+    (the send journal cannot, since a job may legitimately send nothing).
+
+    Written HERE — at the point completion is actually known — rather than in
+    `run_job`, which returns as soon as the entry is enqueued and therefore
+    cannot distinguish "done" from "another drain will do it later". That
+    distinction is not academic: when a conversation is already draining,
+    run_job returns `busy` and the in-flight drain does the work, so a marker
+    written by run_job would be either a lie or absent depending on timing.
+
+    Reading's digest jobs also write this marker from inside their R20 send
+    transaction; re-writing the same path here is idempotent. second-instance's jobs
+    reply through the plain send primitive and had no marker at all until this
+    existed — observed live on 2026-08-02, when the 20:00 post-ride check
+    delivered its brief and left no completion evidence behind.
+
+    CALLED ONLY WHEN THE TURN PRODUCED SEND EVIDENCE. That condition is the
+    whole point and is easy to drop by accident: `_owes_reply` deliberately
+    exempts scheduled jobs from the send-evidence rule *because* the marker is
+    their completion proof. Writing the marker on a bare exit-0 would make it
+    exactly as trustworthy as the exit code — which KTD12 established is not
+    trustworthy at all — and reconciliation would then confirm jobs that
+    delivered nothing. A scheduled job that exits 0 silently gets no marker, so
+    its guard lets the next fire retry it.
+    """
+    for entry in group:
+        job = entry.get("job")
+        if entry.get("source") != "scheduler" or not job:
+            continue
+        try:
+            import guard as guard_mod
+            path = guard_mod.marker_path(job, datetime.now().strftime("%Y-%m-%d"))
+            if not path.exists():
+                path.write_text(_now_iso() + "\n", encoding="utf-8")
+                log(f"turn_runner: marked '{job}' complete ({path.name})")
+        except Exception as exc:  # never let bookkeeping fail a delivered turn
+            log(f"turn_runner: could not write marker for '{job}': {exc}")
+
+
 def _job_marker_exists(job, when_iso=None):
     """Did a scheduled job already complete? The marker is its completion truth
     (the send primitive writes it), so it is the reconciliation evidence for a
@@ -957,7 +1000,8 @@ def _process_group(group, *, invoker, alert, probe, output_check):
             # an outbound stamped with this turn_id in the send journal (U8).
             # Silent jobs owe nothing; scheduled jobs prove completion with the
             # marker the send primitive writes, which is checked by their guard.
-            if _owes_reply(group) and not output_check(turn_id):
+            sent = output_check(turn_id)
+            if _owes_reply(group) and not sent:
                 result = TurnResult(False, None, result.new_head, 0,
                                     "turn exited 0 but produced no outbound "
                                     "(tool denied, or the turn chose not to reply)")
@@ -965,6 +1009,9 @@ def _process_group(group, *, invoker, alert, probe, output_check):
                     f"a failure so it retries instead of vanishing")
             else:
                 mark_processed(uids, session=result.new_head)
+                # Marker only on real send evidence — see _write_job_marker.
+                if sent:
+                    _write_job_marker(group)
                 log(f"turn_runner: turn ok, processed {uids} "
                     f"(session {result.new_head})")
                 return "processed"
