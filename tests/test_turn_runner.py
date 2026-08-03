@@ -1272,3 +1272,77 @@ def test_a_conversational_turn_writes_no_marker(gw, tmp_path):
     markers = list((tr.cfg().agent_state_dir / "markers").glob("*")) \
         if (tr.cfg().agent_state_dir / "markers").exists() else []
     assert markers == []
+
+
+# --- 2026-08-03 outage: a legacy positive scheduler id poisoned the watermark -
+
+def test_legacy_positive_scheduler_id_cannot_raise_the_watermark(gw):
+    """The exact shape that took both instances down.
+
+    Scheduler ids are negative today, but an older scheme used 999000000+seq.
+    Those legacy `processed` rows sat in the live WALs until the first
+    compaction after the change folded them into `max(pos_done)`, parking the
+    watermark ~620M above the bot's real update_id range — after which every
+    genuine message folded as already-done and was silently dropped."""
+    legacy = 999000004                       # positive, but never from Telegram
+    tr.journal_inbound(legacy, "scheduler", OWNER, "legacy brief", job="j")
+    tr.mark_processed([legacy])
+    tr.journal_inbound(378409200, "message", OWNER, block("real", 378409200))
+    tr.mark_processed([378409200])
+    res = tr.compact_wal()
+
+    # The watermark tracks the real message, not the legacy synthetic id.
+    assert res["watermark"] == 378409200
+
+    # And the next real message is still answerable rather than folded away.
+    tr.journal_inbound(378409273, "message", OWNER, block("hi", 378409273))
+    assert [e["update_id"] for e in tr.pending_entries()] == [378409273]
+
+
+def test_watermark_holds_when_a_round_compacts_only_synthetic_ids(gw):
+    # No real message in this round: the watermark must carry forward
+    # unchanged, neither advancing on a synthetic id nor regressing to None.
+    tr.journal_inbound(500, "message", OWNER, block("a", 500))
+    tr.mark_processed([500])
+    assert tr.compact_wal()["watermark"] == 500
+    uid = tr.next_scheduler_update_id()
+    tr.journal_inbound(uid, "scheduler", OWNER, "brief", job="j")
+    tr.mark_processed([uid])
+    assert tr.compact_wal()["watermark"] == 500
+
+
+# --- the detector that would have caught it ----------------------------------
+
+def test_stuck_check_flags_an_inbound_with_no_attempt(gw):
+    tr.journal_inbound(11, "message", OWNER, block("hello", 11))
+    assert tr.unanswered_entries(max_age_s=0) != []          # aged out
+    assert tr.unanswered_entries(max_age_s=3600) == []       # still fresh
+
+
+def test_stuck_check_ignores_entries_a_turn_attempted(gw):
+    tr.journal_inbound(12, "message", OWNER, block("hello", 12))
+    tr.journal_turn_started("tid-1", [12])
+    # Attempted but not yet finished is latency, not a stuck gateway.
+    assert tr.unanswered_entries(max_age_s=0) == []
+
+
+def test_stuck_check_ignores_processed_and_dead_lettered(gw):
+    tr.journal_inbound(13, "message", OWNER, block("a", 13))
+    tr.mark_processed([13])
+    tr.journal_inbound(14, "message", OWNER, block("b", 14))
+    tr.dead_letter(14, "poison")
+    assert tr.unanswered_entries(max_age_s=0) == []
+
+
+def test_stuck_check_sees_what_the_fold_hides(gw):
+    """The detector must not be built on the fold it exists to police.
+
+    With a poisoned watermark `pending_entries()` reports nothing while real
+    messages go unanswered — which is precisely why the drain stayed green for
+    five hours. Reading the raw rows is what makes the two disagree."""
+    tr.journal_inbound(20, "message", OWNER, block("hi", 20))
+    tr.append_jsonl(tr.wal_path(),
+                    {"type": "watermark", "max_processed_update_id": 999000004,
+                     "ts": tr._now_iso()})
+    assert tr.pending_entries() == []                        # the fold hides it
+    assert [r["update_id"] for r in tr.unanswered_entries(max_age_s=0)] == [20]

@@ -255,6 +255,21 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _parse_iso(ts):
+    """Epoch seconds for a `_now_iso` stamp, or None if it is unusable.
+
+    Returns None rather than raising or defaulting: the only caller is the
+    stuck-entry detector, and a row whose age cannot be established must not be
+    reported as stuck on the strength of a guess."""
+    if not isinstance(ts, str) or not ts:
+        return None
+    try:
+        return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
 # --- gateway (non-synced) state root ----------------------------------------
 
 def gateway_state_dir() -> Path:
@@ -451,6 +466,53 @@ def pending_entries():
     inbound, processed, dead = _fold_wal()
     done = processed | dead
     return [r for r in inbound if r.get("update_id") not in done]
+
+
+# An owner message this old with no turn against it is not latency, it is a
+# stuck gateway. The drain runs on a ~5 min supervisor tick and the slowest
+# real job measured is under 8 min, so 30 min is well clear of both.
+UNANSWERED_MAX_AGE_S = 1800
+
+
+def unanswered_entries(max_age_s=UNANSWERED_MAX_AGE_S, now=None):
+    """Inbound records the WAL shows no attempt against, older than max_age_s.
+
+    THE GAP THIS CLOSES: every existing health probe answers "is the pipeline
+    running", none answers "is it doing anything". On 2026-08-03 a poisoned
+    watermark made `_fold_rows` classify real messages as already-processed, so
+    `pending_entries()` was empty, the drain reported `turns: 0` forever, and
+    the poller, backlog probe and scheduled jobs all stayed green while the bot
+    ignored its owner for five hours. A pending-age check could not have caught
+    it — the entries were not pending.
+
+    What the failure DOES leave is an unambiguous on-disk signature: an
+    `inbound` row with neither a `turn_started` nor a `processed` record naming
+    its update_id. Every healthy path writes one or the other within a tick.
+    This deliberately reads the raw rows rather than the fold, because the fold
+    is the thing under suspicion — a detector built on it would inherit the bug
+    it exists to find."""
+    rows = read_jsonl(wal_path())
+    attempted, done = set(), set()
+    for row in rows:
+        t = row.get("type")
+        if t == "turn_started":
+            attempted.update(row.get("update_ids") or [])
+        elif t == "processed":
+            done.update(row.get("update_ids") or [])
+        elif t == "dead_letter":
+            done.add(row.get("update_id"))
+    cutoff = (now or time.time()) - max_age_s
+    stuck = []
+    for row in rows:
+        if row.get("type") != "inbound":
+            continue
+        uid = row.get("update_id")
+        if uid in attempted or uid in done:
+            continue
+        ts = _parse_iso(row.get("ts"))
+        if ts is not None and ts <= cutoff:
+            stuck.append(row)
+    return stuck
 
 
 def wal_size():
@@ -1537,9 +1599,31 @@ def compact_wal():
                                    for u in (r.get("update_ids") or []))]
             # Collapse every discarded `processed` record into one watermark so
             # dedup survives compaction (Telegram can re-deliver an update whose
-            # offset was not yet confirmed). Positive ids only — negative
-            # scheduler ids must never be swallowed.
-            pos_done = [u for u in done if isinstance(u, int) and u > 0]
+            # offset was not yet confirmed).
+            #
+            # ONLY IDS TELEGRAM ACTUALLY DELIVERED MAY RAISE THE WATERMARK.
+            # "positive" is not a sufficient test, and trusting it took both
+            # instances down on 2026-08-03: scheduler ids are negative *today*
+            # (see next_scheduler_update_id) but an older scheme allocated them
+            # as 999000000+seq, and those legacy `processed` rows were still in
+            # both WALs. The first compaction after the scheme change folded
+            # them in, parking the watermark ~620M above the bot's real update_id
+            # range — after which _fold_rows marked every genuine message as
+            # already-done. Silent, total, and invisible to every health probe:
+            # poller alive, backlog zero, scheduled jobs unaffected (their
+            # negative ids are exempt from the fold), drains all reporting
+            # turns: 0. Restricting the source set to ids that arrived as real
+            # inbound messages closes the whole class, including the next
+            # synthetic-id scheme nobody has invented yet.
+            real_ids = {r.get("update_id") for r in rows
+                        if r.get("type") == "inbound"
+                        and r.get("source") == "message"
+                        and isinstance(r.get("update_id"), int)
+                        and r.get("update_id") > 0}
+            pos_done = [u for u in done if u in real_ids]
+            # `prior` needs no such filter: a watermark can only ever have been
+            # raised by this rule, and when pos_done is empty hi degenerates to
+            # prior, which is the correct no-op.
             prior = [r.get("max_processed_update_id") for r in rows
                      if r.get("type") == "watermark"
                      and isinstance(r.get("max_processed_update_id"), int)]
@@ -1581,6 +1665,13 @@ def main(argv=None):
         "rotate", help="daily rotation: flush handoff + drop session + compact")
     p_rot.add_argument("--chat-id", type=int, required=True)
     sub.add_parser("compact", help="compact the inbound WAL (drop processed records)")
+    p_stuck = sub.add_parser(
+        "stuck-check",
+        help="report inbound entries the WAL shows no attempt against")
+    p_stuck.add_argument("--max-age", type=int, default=UNANSWERED_MAX_AGE_S,
+                         metavar="SECONDS",
+                         help=f"age before an unattempted entry counts as stuck "
+                              f"(default {UNANSWERED_MAX_AGE_S})")
     p_prune = sub.add_parser(
         "prune-handoff", help="archive superseded handoff snapshots + log tails")
     p_prune.add_argument("--dry-run", action="store_true",
@@ -1641,6 +1732,19 @@ def main(argv=None):
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
             lock_fd.close()
         return 0
+    if args.command == "stuck-check":
+        # Deliberately lock-free and read-only: this must stay diagnosable while
+        # a drain holds the lock, since "the drain is wedged" is one of the
+        # things it exists to report. Exit 0 clean / 1 stuck, so a shell caller
+        # can branch without parsing.
+        stuck = unanswered_entries(args.max_age)
+        if not stuck:
+            print("stuck-check: clean")
+            return 0
+        oldest = stuck[0]
+        print(f"stuck-check: {len(stuck)} entry(s) with no turn attempted; "
+              f"oldest update_id={oldest.get('update_id')} ts={oldest.get('ts')}")
+        return 1
     if args.command == "prune-handoff":
         # Under the drain lock: a live turn may be mid-Edit on this same file.
         lock_fd = _acquire_lock()

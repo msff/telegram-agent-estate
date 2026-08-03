@@ -147,6 +147,35 @@ notify_owner() {
     || log "owner notify failed: $1"
 }
 
+# --- stuck-gateway tripwire --------------------------------------------------
+# Every other probe here answers "is the pipeline RUNNING": is the poller alive,
+# is the Telegram backlog draining, did the CLI change. None answered "is it
+# doing anything", and on 2026-08-03 that gap cost five hours of silence — a
+# poisoned WAL watermark made the fold classify real messages as already-done,
+# so the poller stayed healthy, the backlog stayed at zero, scheduled jobs kept
+# firing, and every drain reported turns: 0 while the owner was ignored.
+#
+# `stuck-check` is the missing question, asked against the raw WAL rows rather
+# than the fold that was the thing at fault: an inbound entry with no
+# turn_started and no processed record is an attempt that never happened.
+# Exit 1 means stuck. Alerting is throttled to once an hour, because the
+# condition persists until someone intervenes and an alert loop would bury it.
+STUCK_ALERT_FILE="$GW_STATE/stuck-alerted"
+STUCK_ALERT_COOLDOWN=3600
+
+check_stuck_gateway() {
+  local out rc now last
+  out=$("$VENV_PY" "$BINDIR/turn_runner.py" --instance="$NAME" --config "$CONFIG" \
+        stuck-check 2>&1); rc=$?
+  (( rc == 0 )) && { rm -f "$STUCK_ALERT_FILE"; return 0; }
+  now=$(date +%s)
+  last=$(cat "$STUCK_ALERT_FILE" 2>/dev/null || echo 0)
+  (( now - last < STUCK_ALERT_COOLDOWN )) && return 0
+  echo "$now" > "$STUCK_ALERT_FILE"
+  log "stuck gateway: $out"
+  notify_owner "🔴 $LABEL: inbound messages are being journaled but never answered. $out"
+}
+
 # --- CLI-version tripwire ----------------------------------------------------
 # The verified `-p --resume` behaviour (returned-id chain, concurrency) is a
 # property of the installed CLI with no documented stability contract, and the
@@ -280,6 +309,10 @@ while true; do
 
   # CLI-version tripwire every ~10 min.
   (( TICK % 20 == 1 )) && check_cli_version
+
+  # Stuck-gateway tripwire every ~10 min, offset from the drain tick so it never
+  # reads the WAL mid-drain and mistakes an in-flight entry for an abandoned one.
+  (( TICK % 20 == 11 )) && check_stuck_gateway
 
   maybe_housekeeping || true
 
