@@ -1,0 +1,56 @@
+# telegram-agent-estate — the complete dependency set for one instance's venv.
+#
+#   python3 -m venv ~/.local/share/<instance>/venv
+#   ~/.local/share/<instance>/venv/bin/python3 -m pip install -r requirements.txt
+#
+# That venv's interpreter is what goes in the instance config's `python:` field,
+# and it is the ONLY interpreter anything in this repo runs under. Nothing here
+# is installed into a system python, and no entry point falls back to one — see
+# `estate-bootstrap.zsh` for why that fallback had to be removed.
+#
+# ---------------------------------------------------------------------------
+# PYTHON FLOOR: 3.11
+#
+# Tested on 3.11 and above; the live instances run 3.14. macOS ships 3.9 in
+# /usr/bin (and on a machine without Command Line Tools, ships a stub that
+# refuses to run at all), so **Homebrew python — or any other 3.11+ — is a
+# documented prerequisite**, not an optimisation. Requirements files cannot
+# express a floor, so the installer's preflight enforces it and this comment
+# records it; if you move the floor, move it in both places.
+#
+# ---------------------------------------------------------------------------
+# `pytest` IS A RUNTIME DEPENDENCY. It is listed here, not in a separate dev
+# file, and removing it from a "just run the bot" venv breaks the bot.
+#
+# supervisor.sh's CLI-version tripwire notices when the `claude` CLI
+# self-updates, HOLDS every turn, and shells out to
+# `"$VENV_PY" -m pytest tests/test_gateway_parity.py` to decide whether to
+# release them. Without pytest installed that command fails, parity never
+# passes, and turns stay held forever — inbound keeps journaling and the bot
+# goes silent, with the cause a dozen log lines away from the symptom.
+#
+# ---------------------------------------------------------------------------
+# EVERY BOUND IS TWO-SIDED, ON PURPOSE. A floor proves what was tested; it says
+# nothing about what a stranger resolves six months from now. The ceilings are
+# compatible-major: they admit patch and minor releases and stop at the next
+# major, where an API rewrite is permitted by semver and has actually happened
+# here before.
+
+# Instance configs. Read by instance_config.py, which every other module and
+# every shell entry point goes through.
+PyYAML>=6,<7
+
+# Telegram Bot API HTTP calls from send.py / msg_index.py / estate_client.py.
+requests>=2.31,<3
+
+# The long-poller. The ceiling is the load-bearing one in this file:
+# python-telegram-bot has rewritten its API wholesale across majors before, and
+# poller.py imports narrow, movable surfaces from it —
+# `telegram.request.HTTPXRequest` and `telegram.error.{Conflict, NetworkError,
+# RetryAfter, TimedOut}`. The floor is 20.8 for Bot API 7.0 (`message.quote`,
+# which quote resolution depends on); the live venvs run 22.8, so the tested
+# configuration sits well above the floor and the range below covers both.
+python-telegram-bot>=20.8,<23
+
+# Runtime, not dev — see the note above on the CLI-version tripwire.
+pytest>=7,<10

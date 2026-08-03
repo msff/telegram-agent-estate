@@ -40,7 +40,13 @@ PLUGIN_ROOT="${BINDIR:h}"
 # silently never fires.
 AGENTS="${ESTATE_LAUNCH_AGENTS:-$HOME/Library/LaunchAgents}"
 
-eval "$(/usr/bin/env python3 - "$BINDIR" "$CONFIG" <<'PY'
+# Resolve THIS instance's interpreter out of its own config before doing
+# anything else. The ambient `python3` is not usable — see estate-bootstrap.zsh.
+source "$BINDIR/estate-bootstrap.zsh" \
+  || { echo "missing $BINDIR/estate-bootstrap.zsh" >&2; exit 2; }
+estate_resolve_python "$CONFIG" || exit $?
+
+eval "$("$VENV_PY" - "$BINDIR" "$CONFIG" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
 import instance_config
@@ -61,8 +67,10 @@ say() { echo "[install:$NAME] $*"; }
 run() { if [[ -n "$DRY_RUN" ]]; then echo "  would: $*"; else eval "$@"; fi }
 
 # --- preflight ---------------------------------------------------------------
+# `python not executable` is no longer checked here: estate_resolve_python
+# enforces it above, before the config can even be read, and emits the same
+# wording. Repeating it here would be unreachable.
 fail=0
-[[ -x "$VENV_PY" ]] || { say "ERROR: python not executable: $VENV_PY"; fail=1; }
 [[ -d "$WORKDIR" ]] || { say "ERROR: workdir does not exist: $WORKDIR"; fail=1; }
 
 case "$VENV_PY" in
@@ -128,7 +136,7 @@ fi
 render "$PLUGIN_ROOT/templates/plists/supervisor.plist.tmpl" "$SUP_PLIST" "${COMMON[@]}"
 
 # --- scheduled jobs ----------------------------------------------------------
-JOBS=$(/usr/bin/env python3 - "$BINDIR" "$CONFIG" <<'PY'
+JOBS=$("$VENV_PY" - "$BINDIR" "$CONFIG" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
 import instance_config

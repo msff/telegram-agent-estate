@@ -7,6 +7,7 @@ instance-specific string.**
 | file | from | notes |
 |---|---|---|
 | `instance_config.py` | *new* | the seam; everything else reads paths through it |
+| `estate-bootstrap.zsh` | *new* | sourced, not run: sed-reads `python:` so no entry point needs an ambient interpreter |
 | `estate_client.py` | `scripts/reader_client.py` (generic half) | logging, state roots, JSONL journals, conflict guard |
 | `msg_index.py` | `scripts/msg_index.py` | message→document index + send journal |
 | `turn_runner.py` | `daemon/turn_runner.py` | receipt WAL, coalescing, retry, rotation, handoff prune |

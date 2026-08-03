@@ -42,9 +42,16 @@ export ESTATE_INSTANCE_CONFIG="$CONFIG"
 BINDIR="${0:A:h}"
 PLUGIN_ROOT="${BINDIR:h}"
 
+# Resolve THIS instance's interpreter out of its own config before doing
+# anything else. The ambient `python3` is not usable — see estate-bootstrap.zsh.
+source "$BINDIR/estate-bootstrap.zsh" \
+  || { echo "missing $BINDIR/estate-bootstrap.zsh" >&2; exit 2; }
+estate_resolve_python "$CONFIG" || exit $?
+
 # One python call reads the whole config; the shell never re-parses YAML — a
-# second parser is a second set of defaults to drift out of sync with.
-eval "$(/usr/bin/env python3 - "$BINDIR" "$CONFIG" <<'PY'
+# second parser is a second set of defaults to drift out of sync with. (The
+# bootstrap above is the one exception, and it reads exactly one line.)
+eval "$("$VENV_PY" - "$BINDIR" "$CONFIG" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
 import instance_config
@@ -239,7 +246,12 @@ instance_backlog() {
   token="${token//\'/}"
   [[ -z "$token" ]] && { echo ""; return }
   resp=$(curl -s --max-time 5 "https://api.telegram.org/bot${token}/getWebhookInfo" 2>/dev/null) || { echo ""; return }
-  echo "$resp" | /usr/bin/env python3 -c 'import sys,json
+  # $VENV_PY, not the ambient python3. This parse needs only stdlib, so the
+  # temptation is to leave it — but on a mac without Command Line Tools there is
+  # no ambient python3 at all, and this probe fails SILENTLY: the stderr below
+  # is swallowed and an empty reading is read as "backlog is zero", which resets
+  # POLLER_DEAF_HITS and turns the deaf-poller watchdog off without a word.
+  echo "$resp" | "$VENV_PY" -c 'import sys,json
 try:
     d=json.load(sys.stdin)
     print(d["result"]["pending_update_count"] if d.get("ok") else "")

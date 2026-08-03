@@ -26,7 +26,13 @@ export ESTATE_INSTANCE_CONFIG="$CONFIG"
 
 BINDIR="${0:A:h}"
 
-eval "$(/usr/bin/env python3 - "$BINDIR" "$CONFIG" <<'PY'
+# Resolve THIS instance's interpreter out of its own config before doing
+# anything else. The ambient `python3` is not usable — see estate-bootstrap.zsh.
+source "$BINDIR/estate-bootstrap.zsh" \
+  || { echo "missing $BINDIR/estate-bootstrap.zsh" >&2; exit 2; }
+estate_resolve_python "$CONFIG" || exit $?
+
+eval "$("$VENV_PY" - "$BINDIR" "$CONFIG" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
 import instance_config

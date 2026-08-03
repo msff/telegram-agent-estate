@@ -29,9 +29,15 @@ export ESTATE_INSTANCE_CONFIG="$CONFIG"
 BINDIR="${0:A:h}"
 PLUGIN_ROOT="${BINDIR:h}"
 
+# Resolve THIS instance's interpreter out of its own config before doing
+# anything else. The ambient `python3` is not usable — see estate-bootstrap.zsh.
+source "$BINDIR/estate-bootstrap.zsh" \
+  || { echo "missing $BINDIR/estate-bootstrap.zsh" >&2; exit 2; }
+estate_resolve_python "$CONFIG" || exit $?
+
 # Resolve the schedule entry in python — it owns the config schema, and the
 # prompt file may be plugin-relative.
-eval "$(/usr/bin/env python3 - "$BINDIR" "$CONFIG" "$JOB" "$PLUGIN_ROOT" <<'PY'
+eval "$("$VENV_PY" - "$BINDIR" "$CONFIG" "$JOB" "$PLUGIN_ROOT" <<'PY'
 import sys, os
 sys.path.insert(0, sys.argv[1])
 import instance_config
