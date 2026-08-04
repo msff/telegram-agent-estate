@@ -130,7 +130,7 @@ def _config_key_literals():
     keys (see module docstring), and a regex over the source would also collect
     the key names that appear in comments and error messages.
     """
-    tree = ast.parse((PLUGIN_ROOT / "bin" / "instance_config.py")
+    tree = ast.parse((PLUGIN_ROOT / "libexec" / "instance_config.py")
                      .read_text(encoding="utf-8"))
     keys = set()
 
@@ -395,7 +395,7 @@ def test_the_silent_directives_forbid_sending():
 
 def _send_py_options():
     """`send.py`'s CLI as argparse declares it: (positionals, flags)."""
-    tree = ast.parse((PLUGIN_ROOT / "bin" / "send.py").read_text(encoding="utf-8"))
+    tree = ast.parse((PLUGIN_ROOT / "libexec" / "send.py").read_text(encoding="utf-8"))
     positional, flags = [], set()
     for node in ast.walk(tree):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
@@ -421,7 +421,7 @@ def test_the_ops_section_send_command_matches_send_py():
     positional, flags = _send_py_options()
     cmd = _ops_send_command()
     assert "send_transaction.py" not in OPS_SECTION.read_text(encoding="utf-8")
-    assert (PLUGIN_ROOT / "bin" / "send.py").exists()
+    assert (PLUGIN_ROOT / "libexec" / "send.py").exists()
     # Pin the shape that makes the documented command runnable — one positional
     # `text`, and `--chat-id` still optional — rather than the exact flag set.
     # send.py may legitimately grow flags the ops section has no reason to name

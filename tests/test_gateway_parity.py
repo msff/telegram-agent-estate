@@ -20,7 +20,7 @@ TWO MODES.
       REAL TELEGRAM MESSAGES to the owner chat — every one prefixed `[PARITY]`
       so they are obviously drills. Run it deliberately:
 
-          bin/parity.sh <instance.yaml> --real
+          libexec/parity.sh <instance.yaml> --real
 
       which is also what supplies $ESTATE_PARITY_LIVE_CONFIG — the instance
       whose workdir, allowlist and MCP config the drill borrows. Driving pytest
@@ -62,10 +62,10 @@ import msg_index
 import turn_runner as tr
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-BIN = PLUGIN_ROOT / "bin"
+LIBEXEC = PLUGIN_ROOT / "libexec"
 REAL = os.environ.get("ESTATE_PARITY_REAL") == "1"
 real_only = pytest.mark.skipif(
-    not REAL, reason="needs real claude turns: bin/parity.sh <config> --real")
+    not REAL, reason="needs real claude turns: libexec/parity.sh <config> --real")
 
 
 # --- what the instance under test is, resolved rather than assumed -----------
@@ -104,7 +104,7 @@ def send_command():
     """
     c = instance_config.load()
     return (f"{shlex.quote(str(c.python))} "
-            f"{shlex.quote(str(BIN / 'send.py'))}")
+            f"{shlex.quote(str(LIBEXEC / 'send.py'))}")
 
 
 # --- harness ----------------------------------------------------------------
@@ -484,10 +484,10 @@ def test_10_the_gateway_never_reaches_across_instances(gw, tmp_path):
               tr.dead_letter_path()):
         assert str(p).startswith(str(tmp_path)), p
     # 2. process identity. Under the plugin BOTH instances run the same
-    #    bin/poller.py, so a path-keyed probe matches both and one supervisor's
+    #    libexec/poller.py, so a path-keyed probe matches both and one supervisor's
     #    restart reaps the other's poller. Every probe must key on the instance
     #    tag instead.
-    sup = (BIN / "supervisor.sh").read_text(encoding="utf-8")
+    sup = (LIBEXEC / "supervisor.sh").read_text(encoding="utf-8")
     assert 'pgrep -f "poller.py.*$TAG"' in sup, "poller probe is not tag-scoped"
     assert '$TAG.*drain' in sup, "drain probe is not tag-scoped"
     assert "bun server.ts" not in sup
@@ -631,7 +631,7 @@ def test_parity_sh_hands_real_mode_everything_it_needs():
     never exported, and the plugin's conftest — the file that declares the flag
     — is not even loaded when pytest infers its rootdir from a single test file
     under `tests/`."""
-    sh = _code(BIN / "parity.sh")
+    sh = _code(LIBEXEC / "parity.sh")
     assert "--real" in sh, "the script no longer passes the flag"
     assert '--rootdir' in sh, (
         "without an explicit rootdir pytest never loads the conftest that "
@@ -656,14 +656,14 @@ def test_supervisor_and_wrappers_are_wired_to_the_gateway():
     """Guards the cutover itself: the shell layer must drive the runner, not the
     screen. These are the four edits that make the gateway live, and a silent
     revert of any of them is the kind of thing nothing else would catch."""
-    sup = _code(BIN / "supervisor.sh")
+    sup = _code(LIBEXEC / "supervisor.sh")
     assert "turn_runner.py" in sup, "supervisor never drains the WAL"
     assert "housekeeping.sh" in sup, "supervisor never runs the daily window"
     assert "screen -L -dmS" not in sup, "still spawning a screen session"
     assert "inject.sh" not in sup, "still injecting into a screen session"
-    hk = _code(BIN / "housekeeping.sh")
+    hk = _code(LIBEXEC / "housekeeping.sh")
     assert "rotate" in hk, "the daily window no longer rotates"
-    job = _code(BIN / "run-job.sh")
+    job = _code(LIBEXEC / "run-job.sh")
     assert "run-job" in job, "the job wrapper no longer drives the runner"
     assert "inject.sh" not in job, "the job wrapper still injects"
 
@@ -672,7 +672,7 @@ def test_cli_version_tripwire_records_the_running_version():
     """CLI churn is a live risk (U5's --resume semantics have no stability
     contract and the CLI self-updates). The supervisor must notice a version
     change and hold turns until the suite re-passes."""
-    sup = _code(BIN / "supervisor.sh")
+    sup = _code(LIBEXEC / "supervisor.sh")
     assert "--version" in sup
     assert "cli-version" in sup
     assert "turns-held" in sup, "nothing sets the hold flag"

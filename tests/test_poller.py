@@ -1,4 +1,4 @@
-"""Tests for the owned Telegram receive loop (bin/poller.py) and the
+"""Tests for the owned Telegram receive loop (libexec/poller.py) and the
 conversational `reply` send path. The async runtime and ptb are untouched here:
 block_from_message_dict is pure and operates on raw Telegram message JSON."""
 import asyncio

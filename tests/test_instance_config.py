@@ -123,8 +123,8 @@ def test_neither_instances_poller_pattern_matches_the_others_argv(tmp_path):
     its own poller reaps its neighbour's."""
     import re
     a, b = two_instances(tmp_path)
-    argv_a = f"/usr/bin/python3 /opt/estate/bin/poller.py {a.instance_tag()}"
-    argv_b = f"/usr/bin/python3 /opt/estate/bin/poller.py {b.instance_tag()}"
+    argv_a = f"/usr/bin/python3 /opt/estate/libexec/poller.py {a.instance_tag()}"
+    argv_b = f"/usr/bin/python3 /opt/estate/libexec/poller.py {b.instance_tag()}"
 
     assert re.search(a.poller_match(), argv_a)
     assert re.search(b.poller_match(), argv_b)
@@ -142,7 +142,7 @@ def test_poller_pattern_does_not_match_a_bare_mention_of_the_instance(tmp_path):
     for impostor in (
         f"grep -f {a.instance_tag()}",
         f"tail -f /var/log/{a.name}.log",
-        f"vim /opt/estate/bin/poller.py",
+        f"vim /opt/estate/libexec/poller.py",
     ):
         assert not re.search(a.poller_match(), impostor), impostor
 

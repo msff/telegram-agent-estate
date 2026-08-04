@@ -2,15 +2,15 @@
 """Instance configuration — the seam that makes one codebase serve many bots.
 
 ONE plugin, MANY instances. Every string that differs between two bots on the
-same mac is declared in an instance YAML and reaches the rest of `bin/` only
-through this module. Nothing under `bin/` may hardcode a path, a chat id, a
+same mac is declared in an instance YAML and reaches the rest of `libexec/` only
+through this module. Nothing under `libexec/` may hardcode a path, a chat id, a
 label, or a process-match pattern.
 
 WHY THIS IS THE DANGEROUS FILE. Before the plugin, two instances were two
 separate checkouts, so their processes were distinguishable by path alone:
 `pgrep -f first-instance/daemon/telegram_poll.py` could not possibly match
 the second-instance bot. Under the plugin BOTH instances execute the same
-`bin/poller.py`, so every sweep, liveness probe, and kill that matches on the
+`libexec/poller.py`, so every sweep, liveness probe, and kill that matches on the
 executable path now matches BOTH — a supervisor restarting its poller would
 reap the other bot's. That is the R5/R18 failure class, and it is created by
 consolidation itself: the plugin does not inherit the old isolation, it has to
@@ -114,7 +114,7 @@ class InstanceConfig:
     def instance_tag(self):
         """The argv marker every long-lived process of this instance carries.
 
-        Both instances run the same `bin/poller.py`, so the executable path can
+        Both instances run the same `libexec/poller.py`, so the executable path can
         no longer tell them apart (see module docstring). Every spawn appends
         this, and every probe/sweep matches on it, so an instance can only ever
         see its own processes.
@@ -363,7 +363,7 @@ def load(path=None):
     return InstanceConfig(data, source=src)
 
 
-if __name__ == "__main__":  # `python3 bin/instance_config.py [path]` — sanity check
+if __name__ == "__main__":  # `python3 libexec/instance_config.py [path]` — sanity check
     import sys
     cfg = load(sys.argv[1] if len(sys.argv) > 1 else None)
     print(f"name         {cfg.name}")

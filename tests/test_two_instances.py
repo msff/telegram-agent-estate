@@ -1,6 +1,6 @@
 """THE U13 GATE: two instances must not cross.
 
-From `bin/README.md`: *every string in the transplant table's right-hand column
+From `libexec/README.md`: *every string in the transplant table's right-hand column
 comes from the instance config, and two mock instances must run side by side
 without their sweeps, locks, or probes crossing.*
 
@@ -33,7 +33,7 @@ import send
 import turn_runner as tr
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-BIN = PLUGIN_ROOT / "bin"
+LIBEXEC = PLUGIN_ROOT / "libexec"
 
 
 def build_instance(root, name, chat):
@@ -95,12 +95,12 @@ def test_no_launchd_label_is_shared(pair):
 # --- 2. probes select exactly one instance ------------------------------------
 
 def test_process_probes_do_not_match_the_other_instance(pair):
-    """Both instances run the SAME bin/poller.py, so a probe keyed on the script
+    """Both instances run the SAME libexec/poller.py, so a probe keyed on the script
     path matches both. A supervisor restarting its own poller would then reap
     its neighbour's — and the neighbour's supervisor would restart it, forever."""
     a, b = pair
-    argv_a = f"{sys.executable} {BIN}/poller.py {a.instance_tag()} --config {a.source}"
-    argv_b = f"{sys.executable} {BIN}/poller.py {b.instance_tag()} --config {b.source}"
+    argv_a = f"{sys.executable} {LIBEXEC}/poller.py {a.instance_tag()} --config {a.source}"
+    argv_b = f"{sys.executable} {LIBEXEC}/poller.py {b.instance_tag()} --config {b.source}"
 
     assert re.search(a.poller_match(), argv_a)
     assert not re.search(a.poller_match(), argv_b)
@@ -114,8 +114,8 @@ def test_drain_probe_does_not_match_the_other_instance(pair):
     other stayed busy — silently, every tick."""
     a, b = pair
     pat = lambda c: f"turn_runner.py.*{re.escape(c.instance_tag())}.*drain"
-    argv_a = f"{sys.executable} {BIN}/turn_runner.py {a.instance_tag()} --config {a.source} drain"
-    argv_b = f"{sys.executable} {BIN}/turn_runner.py {b.instance_tag()} --config {b.source} drain"
+    argv_a = f"{sys.executable} {LIBEXEC}/turn_runner.py {a.instance_tag()} --config {a.source} drain"
+    argv_b = f"{sys.executable} {LIBEXEC}/turn_runner.py {b.instance_tag()} --config {b.source} drain"
     assert re.search(pat(a), argv_a) and not re.search(pat(a), argv_b)
     assert re.search(pat(b), argv_b) and not re.search(pat(b), argv_a)
 
@@ -213,7 +213,7 @@ def test_a_tag_config_mismatch_is_refused_by_both_entry_points(pair):
     misconfiguration available — the process would answer as the wrong bot."""
     a, b = pair
     for script in ("poller.py", "turn_runner.py"):
-        argv = [sys.executable, str(BIN / script), f"--instance={a.name}",
+        argv = [sys.executable, str(LIBEXEC / script), f"--instance={a.name}",
                 "--config", str(b.source)]
         if script == "turn_runner.py":
             argv.append("drain")
@@ -261,11 +261,11 @@ def test_installer_refuses_two_configs_sharing_a_name(tmp_path):
     agents.mkdir()
     env = {**os.environ, "ESTATE_LAUNCH_AGENTS": str(agents)}
 
-    ok = subprocess.run([str(BIN / "install-instance.sh"), str(first.source), "--no-load"],
+    ok = subprocess.run([str(LIBEXEC / "install-instance.sh"), str(first.source), "--no-load"],
                         capture_output=True, text=True, env=env, timeout=120)
     assert ok.returncode == 0, ok.stderr
 
-    clash = subprocess.run([str(BIN / "install-instance.sh"), str(second.source), "--no-load"],
+    clash = subprocess.run([str(LIBEXEC / "install-instance.sh"), str(second.source), "--no-load"],
                            capture_output=True, text=True, env=env, timeout=120)
     assert clash.returncode == 1
     assert "already belongs to a different instance config" in clash.stdout
@@ -282,7 +282,7 @@ def test_installer_renders_valid_plists_for_both_instances(pair, tmp_path):
 
     for c in (a, b):
         proc = subprocess.run(
-            [str(BIN / "install-instance.sh"), str(c.source), "--no-load"],
+            [str(LIBEXEC / "install-instance.sh"), str(c.source), "--no-load"],
             capture_output=True, text=True, env=env, timeout=120)
         assert proc.returncode == 0, proc.stdout + proc.stderr
 

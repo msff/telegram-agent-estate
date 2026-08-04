@@ -1,11 +1,14 @@
 # Interpreter bootstrap, sourced by every shell entry point.
 #
-#   BINDIR="${0:A:h}"
-#   source "$BINDIR/estate-bootstrap.zsh"
+#   LIBEXEC="${0:A:h}"
+#   source "$LIBEXEC/estate-bootstrap.zsh"
 #   estate_resolve_python "$CONFIG"      # sets VENV_PY, or fails with a message
 #
-# NOT executable and NOT a command: it defines one function and returns. (That
-# also keeps it inert in `bin/`, which Claude puts on the Bash tool's PATH.)
+# NOT executable and NOT a command: it defines one function and returns. It
+# lives in `libexec/`, which is on nobody's PATH — the whole directory moved out
+# of `bin/` at U4 because Claude Code puts an enabled plugin's `bin/` on the
+# Bash tool's PATH, and a file named `estate-bootstrap.zsh` there is one an
+# installing stranger's shell can resolve.
 #
 # ------------------------------------------------------------------------------
 # WHY THIS EXISTS

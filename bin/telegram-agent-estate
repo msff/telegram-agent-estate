@@ -1,0 +1,114 @@
+#!/bin/zsh
+# telegram-agent-estate — the one command this plugin puts on your PATH.
+#
+# Usage:  telegram-agent-estate <subcommand> [args...]
+#
+# ------------------------------------------------------------------------------
+# WHY THIS FILE EXISTS (KTD5)
+#
+# Claude Code adds an enabled plugin's `bin/` to the Bash tool's PATH for every
+# session — verified live. So whatever sits in `bin/` is what an installing
+# stranger's shell resolves `send.py`, `guard.py`, `parity.sh` and
+# `supervisor.sh` to. Twelve generic names is a collision surface; one
+# namespaced name is a reasonable thing to ask of a user.
+#
+# Therefore: the implementation lives in `libexec/`, which is on nobody's PATH,
+# and this dispatcher is the only inhabitant of `bin/`. launchd still invokes
+# `libexec/supervisor.sh` and `libexec/run-job.sh` by absolute path — the plists
+# do not route through here, because a scheduled job must not depend on PATH at
+# all.
+#
+# THE EXIT CODE IS THE CONTRACT. Every subcommand `exec`s its target, so the
+# status a caller sees is the target's own, unmodified, by construction rather
+# than by a `$?` that someone might one day forget to propagate. That matters
+# beyond tidiness: `run-job.sh` carries the guard's idempotency codes
+# (0 enqueued · 3 marker · 4 lease · 5 too early) and losing one of them turns
+# duplicate suppression into a duplicate send.
+#
+# This script's OWN failures use 2, the same code the libexec entry points use
+# for "you asked for something I cannot do": unknown subcommand, missing
+# subcommand, and a subcommand whose implementation has not landed yet.
+# ------------------------------------------------------------------------------
+set -u
+
+SELF="${0:A}"
+BIN_DIR="${SELF:h}"
+PLUGIN_ROOT="${BIN_DIR:h}"
+
+# U7/KTD1 SEAM — DO NOT BUILD ON THIS RESOLUTION.
+#
+# Today `libexec/` is resolved relative to this file, which is correct while the
+# only copy of the plugin is the one you are running from. It stops being
+# correct once onboarding provisions a separate pinned checkout for launchd to
+# execute: this dispatcher is necessarily cache-resident (that is the directory
+# Claude puts on PATH), so a hand-run `parity` would then verify the cache copy
+# while the daemon runs a different pin — the one place a user looks to confirm
+# the two agree would be the one place that cannot see the disagreement.
+#
+# U7 replaces the line below with a read of the runtime stamp file, and makes a
+# missing stamp a hard failure carrying a "provision first" instruction rather
+# than a silent fallback to the cache. Nothing else in this file changes.
+LIBEXEC="$PLUGIN_ROOT/libexec"
+
+usage() {
+  cat <<'EOF'
+usage: telegram-agent-estate <subcommand> [args...]
+
+  install <instance.yaml> [--dry-run] [--no-load]
+        render this instance's launchd plists and load them
+  parity <instance.yaml> [--real]
+        run the parity suite against this instance
+
+Not yet available:
+  provision, upgrade    (the runtime provisioner lands in U7)
+  uninstall             (lands in U8)
+
+Arguments and exit codes are passed through to the implementation in
+libexec/ unchanged.
+EOF
+}
+
+# subcommand -> the libexec entry point it is a name for.
+typeset -A TARGETS=(
+  install  install-instance.sh
+  parity   parity.sh
+)
+
+# subcommand -> why it is not runnable yet. Declared rather than omitted so the
+# five-name surface is visible in `--help` from the start, and so asking for one
+# early gets an answer instead of "unknown subcommand", which reads as a typo.
+typeset -A PENDING=(
+  provision "the runtime provisioner lands in U7"
+  upgrade   "the runtime provisioner lands in U7"
+  uninstall "uninstall-instance.sh lands in U8"
+)
+
+cmd="${1:-}"
+case "$cmd" in
+  ""|-h|--help|help)
+    usage
+    [[ -z "$cmd" ]] && exit 2
+    exit 0
+    ;;
+esac
+shift
+
+if [[ -n "${PENDING[$cmd]:-}" ]]; then
+  print -ru2 -- "telegram-agent-estate: '$cmd' is not available yet — ${PENDING[$cmd]}."
+  exit 2
+fi
+
+target="${TARGETS[$cmd]:-}"
+if [[ -z "$target" ]]; then
+  print -ru2 -- "telegram-agent-estate: unknown subcommand '$cmd'"
+  usage >&2
+  exit 2
+fi
+
+if [[ ! -x "$LIBEXEC/$target" ]]; then
+  print -ru2 -- "telegram-agent-estate: missing or non-executable $LIBEXEC/$target"
+  print -ru2 -- "  This copy of the plugin is incomplete. Reinstall it."
+  exit 2
+fi
+
+exec "$LIBEXEC/$target" "$@"

@@ -160,7 +160,7 @@ def test_concurrent_appends_do_not_interleave(tmp_path):
     """Twenty writers, one file, no torn lines. O_APPEND + flock + a single
     os.write per record is what makes that hold."""
     p = tmp_path / "j.jsonl"
-    binpath = str(ic.Path(__file__).resolve().parent.parent / "bin")
+    binpath = str(ic.Path(__file__).resolve().parent.parent / "libexec")
     prog = textwrap.dedent(f"""
         import sys
         sys.path.insert(0, {binpath!r})

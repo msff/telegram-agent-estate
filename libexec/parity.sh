@@ -35,16 +35,16 @@ CONFIG="${CONFIG:A}"
 [[ -r "$CONFIG" ]] || { echo "unreadable instance config: $CONFIG" >&2; exit 2; }
 export ESTATE_INSTANCE_CONFIG="$CONFIG"
 
-BINDIR="${0:A:h}"
-PLUGIN_ROOT="${BINDIR:h}"
+LIBEXEC="${0:A:h}"
+PLUGIN_ROOT="${LIBEXEC:h}"
 
 # Resolve THIS instance's interpreter out of its own config before doing
 # anything else. The ambient `python3` is not usable — see estate-bootstrap.zsh.
-source "$BINDIR/estate-bootstrap.zsh" \
-  || { echo "missing $BINDIR/estate-bootstrap.zsh" >&2; exit 2; }
+source "$LIBEXEC/estate-bootstrap.zsh" \
+  || { echo "missing $LIBEXEC/estate-bootstrap.zsh" >&2; exit 2; }
 estate_resolve_python "$CONFIG" || exit $?
 
-eval "$("$VENV_PY" - "$BINDIR" "$CONFIG" <<'PY'
+eval "$("$VENV_PY" - "$LIBEXEC" "$CONFIG" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
 import instance_config
@@ -93,7 +93,7 @@ cd "$WORKDIR" || { echo "missing workdir $WORKDIR" >&2; exit 1; }
 args=(-m pytest --rootdir "$PLUGIN_ROOT" "$PLUGIN_ROOT/tests/test_gateway_parity.py" -q)
 [[ -n "$REAL" ]] && args+=(--real)
 
-PYTHONPATH="$BINDIR${PYTHONPATH:+:$PYTHONPATH}" "$VENV_PY" "${args[@]}"
+PYTHONPATH="$LIBEXEC${PYTHONPATH:+:$PYTHONPATH}" "$VENV_PY" "${args[@]}"
 rc=$?
 if (( rc == 0 )); then
   echo "[parity:$NAME] PASS"

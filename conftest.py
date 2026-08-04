@@ -1,8 +1,11 @@
-"""Put `bin/` on sys.path for the test suite, and declare the parity switches.
+"""Put `libexec/` on sys.path for the test suite, and declare the parity switches.
 
-The plugin's executables live in `bin/` and are run directly (launchd invokes
-them by absolute path), so there is no package to install and no `src` layout to
-lean on. Tests import them as plain modules.
+The plugin's executables live in `libexec/` and are run directly (launchd
+invokes them by absolute path), so there is no package to install and no `src`
+layout to lean on. Tests import them as plain modules. They live under
+`libexec/` and not `bin/` because Claude Code puts an enabled plugin's `bin/` on
+the Bash tool's PATH — `bin/` holds one namespaced dispatcher and nothing else
+(KTD5).
 
 Deliberately NOT setting any state-directory environment variable here. Every
 test that touches state must redirect it explicitly and visibly, because a
@@ -14,8 +17,8 @@ can see in the test body is one you can check.
 THE PARITY SUITE'S TWO MODES ARE DECLARED HERE. `--real` is the switch, and it
 lives in this file because a pytest option that nothing declares is not an
 option: pytest rejects the whole run with `unrecognized arguments: --real`
-before a single test is collected. `bin/parity.sh` passed that flag from the day
-it was written, so real mode — the only mode that can prove a permission
+before a single test is collected. `libexec/parity.sh` passed that flag from the
+day it was written, so real mode — the only mode that can prove a permission
 allowlist complete — had never once run.
 """
 import os
@@ -24,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent / "bin"))
+sys.path.insert(0, str(Path(__file__).parent / "libexec"))
 
 # How real mode reaches the test module. The FLAG is canonical; this variable is
 # how the decision travels to code that runs before any fixture (the parity
@@ -71,7 +74,7 @@ def pytest_configure(config):
             f"--real needs ${LIVE_CONFIG_ENV}. Real mode runs its turns against "
             f"a live instance's workdir, permission allowlist and MCP config, "
             f"and there is no default to fall back to. "
-            f"`bin/parity.sh <instance.yaml> --real` sets it from its own "
+            f"`libexec/parity.sh <instance.yaml> --real` sets it from its own "
             f"argument; setting {REAL_ENV}=1 by hand means setting this too.")
     if not Path(live).expanduser().is_file():
         raise pytest.UsageError(

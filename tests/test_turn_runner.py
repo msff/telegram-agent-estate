@@ -1,4 +1,4 @@
-"""Tests for the U6 receipt WAL + turn runner (bin/turn_runner.py).
+"""Tests for the U6 receipt WAL + turn runner (libexec/turn_runner.py).
 
 No network, no CLI, no live session: the claude invoker, the quota probe, the
 owner-alert sender, and the retry-safety predicate are all injected.

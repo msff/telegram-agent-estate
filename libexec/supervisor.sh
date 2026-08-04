@@ -15,7 +15,7 @@
 # path — correct precisely because each instance had its own checkout, so
 # `pgrep -f /…/first-instance/daemon/telegram_poll.py` could not possibly
 # match the second-instance bot. Under the plugin BOTH instances execute
-# `<plugin>/bin/poller.py`, so that same pattern now matches both, and:
+# `<plugin>/libexec/poller.py`, so that same pattern now matches both, and:
 #
 #   - `poller_pid` would return the OTHER instance's poller, so this instance
 #     would never notice its own was dead;
@@ -26,7 +26,7 @@
 #
 # So every probe here matches on `--instance=<name>`, which the poller and
 # runner carry in argv and cross-check against their loaded config. The rule for
-# anything added later: NEVER match on a path under bin/, always on the tag.
+# anything added later: NEVER match on a path under libexec/, always on the tag.
 # ------------------------------------------------------------------------------
 set -u
 
@@ -39,19 +39,19 @@ CONFIG="${CONFIG/#\~/$HOME}"
 [[ -r "$CONFIG" ]] || { echo "unreadable instance config: $CONFIG" >&2; exit 2; }
 export ESTATE_INSTANCE_CONFIG="$CONFIG"
 
-BINDIR="${0:A:h}"
-PLUGIN_ROOT="${BINDIR:h}"
+LIBEXEC="${0:A:h}"
+PLUGIN_ROOT="${LIBEXEC:h}"
 
 # Resolve THIS instance's interpreter out of its own config before doing
 # anything else. The ambient `python3` is not usable — see estate-bootstrap.zsh.
-source "$BINDIR/estate-bootstrap.zsh" \
-  || { echo "missing $BINDIR/estate-bootstrap.zsh" >&2; exit 2; }
+source "$LIBEXEC/estate-bootstrap.zsh" \
+  || { echo "missing $LIBEXEC/estate-bootstrap.zsh" >&2; exit 2; }
 estate_resolve_python "$CONFIG" || exit $?
 
 # One python call reads the whole config; the shell never re-parses YAML — a
 # second parser is a second set of defaults to drift out of sync with. (The
 # bootstrap above is the one exception, and it reads exactly one line.)
-eval "$("$VENV_PY" - "$BINDIR" "$CONFIG" <<'PY'
+eval "$("$VENV_PY" - "$LIBEXEC" "$CONFIG" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
 import instance_config
@@ -75,8 +75,8 @@ PY
 )" || { echo "failed to load instance config $CONFIG" >&2; exit 2; }
 
 DAEMON_LOG="$LOGDIR/daemon.log"
-POLLER="$BINDIR/poller.py"
-RUNNER="$BINDIR/turn_runner.py"
+POLLER="$LIBEXEC/poller.py"
+RUNNER="$LIBEXEC/turn_runner.py"
 TAG="--instance=$NAME"
 
 mkdir -p "$LOGDIR" "$GW_STATE" "$AGENT_STATE"
@@ -150,7 +150,7 @@ ensure_drain() {
 }
 
 notify_owner() {
-  "$VENV_PY" "$BINDIR/send.py" "$1" >> "$DAEMON_LOG" 2>&1 \
+  "$VENV_PY" "$LIBEXEC/send.py" "$1" >> "$DAEMON_LOG" 2>&1 \
     || log "owner notify failed: $1"
 }
 
@@ -172,7 +172,7 @@ STUCK_ALERT_COOLDOWN=3600
 
 check_stuck_gateway() {
   local out rc now last
-  out=$("$VENV_PY" "$BINDIR/turn_runner.py" --instance="$NAME" --config "$CONFIG" \
+  out=$("$VENV_PY" "$LIBEXEC/turn_runner.py" --instance="$NAME" --config "$CONFIG" \
         stuck-check 2>&1); rc=$?
   (( rc == 0 )) && { rm -f "$STUCK_ALERT_FILE"; return 0; }
   now=$(date +%s)
@@ -226,7 +226,7 @@ maybe_housekeeping() {
   [[ "$hour" -lt "$HOUSEKEEPING_HOUR" ]] && return 1
   last=$(cat "$HOUSEKEEPING_STAMP" 2>/dev/null || echo "")
   [[ "$last" == "$today" ]] && return 1
-  "$BINDIR/housekeeping.sh" "$CONFIG" >> "$DAEMON_LOG" 2>&1 \
+  "$LIBEXEC/housekeeping.sh" "$CONFIG" >> "$DAEMON_LOG" 2>&1 \
     || log "housekeeping returned non-zero — see above"
   echo "$today" > "$HOUSEKEEPING_STAMP"
   return 0

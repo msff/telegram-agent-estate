@@ -32,8 +32,13 @@ CONFIG="${CONFIG/#\~/$HOME}"
 CONFIG="${CONFIG:A}"
 [[ -r "$CONFIG" ]] || { echo "unreadable instance config: $CONFIG" >&2; exit 2; }
 
-BINDIR="${0:A:h}"
-PLUGIN_ROOT="${BINDIR:h}"
+# The directory this script sits in is what gets stamped into every plist as an
+# absolute path, so launchd holds a copy of it until the next install. It is
+# `libexec/` and not `bin/` since U4 (KTD5) — the plists deliberately do not
+# route through the `bin/` dispatcher, because a scheduled job must not depend
+# on PATH, and `exec`ing one more process buys nothing here.
+LIBEXEC="${0:A:h}"
+PLUGIN_ROOT="${LIBEXEC:h}"
 # Overridable so the two-instance isolation drill can render real plists into a
 # scratch directory. Nothing else should set it: an instance installed outside
 # ~/Library/LaunchAgents is never loaded by launchd, so it looks installed and
@@ -42,11 +47,11 @@ AGENTS="${ESTATE_LAUNCH_AGENTS:-$HOME/Library/LaunchAgents}"
 
 # Resolve THIS instance's interpreter out of its own config before doing
 # anything else. The ambient `python3` is not usable — see estate-bootstrap.zsh.
-source "$BINDIR/estate-bootstrap.zsh" \
-  || { echo "missing $BINDIR/estate-bootstrap.zsh" >&2; exit 2; }
+source "$LIBEXEC/estate-bootstrap.zsh" \
+  || { echo "missing $LIBEXEC/estate-bootstrap.zsh" >&2; exit 2; }
 estate_resolve_python "$CONFIG" || exit $?
 
-eval "$("$VENV_PY" - "$BINDIR" "$CONFIG" <<'PY'
+eval "$("$VENV_PY" - "$LIBEXEC" "$CONFIG" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
 import instance_config
@@ -123,7 +128,7 @@ render() {
 }
 
 COMMON=(
-  "name=$NAME" "label_prefix=$LABEL_PREFIX" "plugin_bin=$BINDIR"
+  "name=$NAME" "label_prefix=$LABEL_PREFIX" "plugin_libexec=$LIBEXEC"
   "instance_config=$CONFIG" "log_dir=$LOGDIR" "home=$HOME"
   "path=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:$HOME/.local/bin"
 )
@@ -136,7 +141,7 @@ fi
 render "$PLUGIN_ROOT/templates/plists/supervisor.plist.tmpl" "$SUP_PLIST" "${COMMON[@]}"
 
 # --- scheduled jobs ----------------------------------------------------------
-JOBS=$("$VENV_PY" - "$BINDIR" "$CONFIG" <<'PY'
+JOBS=$("$VENV_PY" - "$LIBEXEC" "$CONFIG" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
 import instance_config
@@ -191,4 +196,4 @@ else
   done
 fi
 
-say "done. Verify with:  $BINDIR/parity.sh $CONFIG"
+say "done. Verify with:  $LIBEXEC/parity.sh $CONFIG"

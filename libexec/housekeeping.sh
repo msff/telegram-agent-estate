@@ -24,15 +24,15 @@ CONFIG="${CONFIG/#\~/$HOME}"
 [[ -r "$CONFIG" ]] || { echo "unreadable instance config: $CONFIG" >&2; exit 2; }
 export ESTATE_INSTANCE_CONFIG="$CONFIG"
 
-BINDIR="${0:A:h}"
+LIBEXEC="${0:A:h}"
 
 # Resolve THIS instance's interpreter out of its own config before doing
 # anything else. The ambient `python3` is not usable — see estate-bootstrap.zsh.
-source "$BINDIR/estate-bootstrap.zsh" \
-  || { echo "missing $BINDIR/estate-bootstrap.zsh" >&2; exit 2; }
+source "$LIBEXEC/estate-bootstrap.zsh" \
+  || { echo "missing $LIBEXEC/estate-bootstrap.zsh" >&2; exit 2; }
 estate_resolve_python "$CONFIG" || exit $?
 
-eval "$("$VENV_PY" - "$BINDIR" "$CONFIG" <<'PY'
+eval "$("$VENV_PY" - "$LIBEXEC" "$CONFIG" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
 import instance_config
@@ -50,7 +50,7 @@ print(f"HK_SCRIPT={q(c.housekeeping_script or '')}")
 PY
 )" || { echo "failed to load instance config $CONFIG" >&2; exit 2; }
 
-RUNNER="$BINDIR/turn_runner.py"
+RUNNER="$LIBEXEC/turn_runner.py"
 TAG="--instance=$NAME"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }

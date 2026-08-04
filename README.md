@@ -51,7 +51,8 @@ what the session map and the nightly handoff rotation are for.
 
 ```
 .claude-plugin/     plugin.json + marketplace.json
-bin/                the executable stack (see bin/README.md — lands in U13)
+bin/                ONE file: the `telegram-agent-estate` dispatcher
+libexec/            the executable stack (see libexec/README.md)
 templates/
   instance.yaml     the instance config schema, heavily commented
   permissions.json  allowlist template, reviewed and edited on install
@@ -65,6 +66,22 @@ tests/              the parity suite, doubling as per-instance self-test
 ## Status
 
 **Scaffold (U12).** The architecture is proven in production on one instance
-(first-instance, cut over 2026-07-28); `bin/` is transplanted and
-parameterized in U13, after that instance's soak week. See `bin/README.md` for
-why the code was deliberately not copied yet.
+(first-instance, cut over 2026-07-28); the executable stack is transplanted
+and parameterized in U13, after that instance's soak week, and moved to
+`libexec/` in U4. See `libexec/README.md` for the transplant table and the
+isolation rules that directory exists to enforce.
+
+## Commands
+
+Enabling this plugin puts exactly one name on your PATH:
+
+```sh
+telegram-agent-estate install <instance.yaml> [--dry-run] [--no-load]
+telegram-agent-estate parity  <instance.yaml> [--real]
+```
+
+`provision`, `upgrade` and `uninstall` are declared and not yet implemented;
+each says so and exits 2. Everything else — the supervisor, the poller, the turn
+runner, the scheduled-job entry point — lives in `libexec/`, which launchd
+invokes by absolute path and which is deliberately not on anyone's PATH.
+Arguments and exit codes pass through the dispatcher unchanged.

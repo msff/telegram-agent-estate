@@ -10,7 +10,7 @@
 
   Bracketed placeholders to substitute:
     [ABSOLUTE_PYTHON_PATH]  the instance's venv interpreter, literally
-    [ESTATE_BIN]            the directory this plugin's executables run from
+    [ESTATE_LIBEXEC]        the plugin's libexec/, where its executables live
     [HANDOFF_FILE]          housekeeping.handoff_file, relative to the workdir
 
   Keep it accurate rather than short: every paragraph here replaced a wrong
@@ -39,7 +39,7 @@ on:
 result goes nowhere. To speak to the user you must run:
 
 ```
-[ABSOLUTE_PYTHON_PATH] [ESTATE_BIN]/send.py "your message text"
+[ABSOLUTE_PYTHON_PATH] [ESTATE_LIBEXEC]/send.py "your message text"
 ```
 
 The message text is the one positional argument — quote it, and send one

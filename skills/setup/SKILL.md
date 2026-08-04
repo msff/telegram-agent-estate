@@ -58,15 +58,15 @@ Ask, and stop if the answer is no:
 
 5. **Render and install the launchd jobs.**
    ```
-   <plugin>/bin/install-instance.sh <workdir>/agent-instance.yaml
+   <plugin>/libexec/install-instance.sh <workdir>/agent-instance.yaml
    ```
    Plists install **by copy, never symlink** — `launchctl load` of a symlink
    whose target is in Dropbox fails EIO on macOS 15. Re-copy after any edit.
 
 6. **Run the parity suite.** Fast mode first, then the real one:
    ```
-   <plugin>/bin/parity.sh <workdir>/agent-instance.yaml
-   <plugin>/bin/parity.sh <workdir>/agent-instance.yaml --real
+   <plugin>/libexec/parity.sh <workdir>/agent-instance.yaml
+   <plugin>/libexec/parity.sh <workdir>/agent-instance.yaml --real
    ```
    `--real` drives actual turns and **sends `[PARITY]` messages to the owner
    chat** — warn the user before running it. It is the only thing that proves

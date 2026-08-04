@@ -1,8 +1,15 @@
-# `bin/` — the shared executable stack
+# `libexec/` — the shared executable stack
 
 Transplanted from `first-instance/daemon/` at U13 (2026-08-02) and
 parameterized by the instance config. **Nothing here may hardcode an
 instance-specific string.**
+
+**Why `libexec/` and not `bin/`** (KTD5): Claude Code adds an enabled plugin's
+`bin/` to the Bash tool's PATH for every session, so shipping these twelve files
+under those names would put `send.py`, `guard.py`, `parity.sh` and
+`supervisor.sh` into every installing user's shell. `bin/` holds exactly one
+file — the `telegram-agent-estate` dispatcher — and everything real lives here,
+reached either through that dispatcher or, for launchd, by absolute path.
 
 | file | from | notes |
 |---|---|---|
@@ -33,7 +40,7 @@ now execute these exact files.
 
 So:
 
-- **Never match a process on a path under `bin/`.** Always match the
+- **Never match a process on a path under `libexec/`.** Always match the
   `--instance=<name>` tag (`InstanceConfig.poller_match()`). A path-keyed probe
   matches every instance, which turns "restart my poller" into "kill my
   neighbour's".
@@ -55,15 +62,23 @@ probes. Add to it whenever you add shared state.
 ```sh
 export ESTATE_INSTANCE_CONFIG=~/.config/<name>/instance.yaml
 
-bin/supervisor.sh   "$ESTATE_INSTANCE_CONFIG"          # the daemon (launchd does this)
-bin/housekeeping.sh "$ESTATE_INSTANCE_CONFIG"          # force the daily window now
-bin/run-job.sh      "$ESTATE_INSTANCE_CONFIG" morning-digest
-bin/parity.sh       "$ESTATE_INSTANCE_CONFIG" [--real]
-bin/install-instance.sh "$ESTATE_INSTANCE_CONFIG" [--dry-run] [--no-load]
+libexec/supervisor.sh   "$ESTATE_INSTANCE_CONFIG"      # the daemon (launchd does this)
+libexec/housekeeping.sh "$ESTATE_INSTANCE_CONFIG"      # force the daily window now
+libexec/run-job.sh      "$ESTATE_INSTANCE_CONFIG" morning-digest
+libexec/parity.sh       "$ESTATE_INSTANCE_CONFIG" [--real]
+libexec/install-instance.sh "$ESTATE_INSTANCE_CONFIG" [--dry-run] [--no-load]
 
-bin/turn_runner.py --instance=<name> drain
-bin/turn_runner.py --instance=<name> prune-handoff --dry-run
-bin/guard.py guard <job>            # exit: 0 run · 3 marker · 4 lease · 5 too early
+libexec/turn_runner.py --instance=<name> drain
+libexec/turn_runner.py --instance=<name> prune-handoff --dry-run
+libexec/guard.py guard <job>        # exit: 0 run · 3 marker · 4 lease · 5 too early
+```
+
+The two with a user-facing name are also reachable through the dispatcher, which
+is what a user has on their PATH and what the docs point at:
+
+```sh
+telegram-agent-estate install "$ESTATE_INSTANCE_CONFIG" [--dry-run] [--no-load]
+telegram-agent-estate parity  "$ESTATE_INSTANCE_CONFIG" [--real]
 ```
 
 `--instance` is cross-checked against the loaded config; a mismatch exits 2

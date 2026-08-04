@@ -26,18 +26,18 @@ CONFIG="${CONFIG/#\~/$HOME}"
 [[ -r "$CONFIG" ]] || { echo "unreadable instance config: $CONFIG" >&2; exit 2; }
 export ESTATE_INSTANCE_CONFIG="$CONFIG"
 
-BINDIR="${0:A:h}"
-PLUGIN_ROOT="${BINDIR:h}"
+LIBEXEC="${0:A:h}"
+PLUGIN_ROOT="${LIBEXEC:h}"
 
 # Resolve THIS instance's interpreter out of its own config before doing
 # anything else. The ambient `python3` is not usable — see estate-bootstrap.zsh.
-source "$BINDIR/estate-bootstrap.zsh" \
-  || { echo "missing $BINDIR/estate-bootstrap.zsh" >&2; exit 2; }
+source "$LIBEXEC/estate-bootstrap.zsh" \
+  || { echo "missing $LIBEXEC/estate-bootstrap.zsh" >&2; exit 2; }
 estate_resolve_python "$CONFIG" || exit $?
 
 # Resolve the schedule entry in python — it owns the config schema, and the
 # prompt file may be plugin-relative.
-eval "$("$VENV_PY" - "$BINDIR" "$CONFIG" "$JOB" "$PLUGIN_ROOT" <<'PY'
+eval "$("$VENV_PY" - "$LIBEXEC" "$CONFIG" "$JOB" "$PLUGIN_ROOT" <<'PY'
 import sys, os
 sys.path.insert(0, sys.argv[1])
 import instance_config
@@ -83,7 +83,7 @@ PY
 
 PROMPT=$(cat "$PROMPT_FILE") || { echo "cannot read $PROMPT_FILE" >&2; exit 2; }
 
-args=("$BINDIR/turn_runner.py" "--instance=$NAME" --config "$CONFIG" run-job
+args=("$LIBEXEC/turn_runner.py" "--instance=$NAME" --config "$CONFIG" run-job
       --job "$JOB" --prompt "$PROMPT" --chat-id "$CHAT")
 [[ -n "$NOT_BEFORE" ]] && args+=(--not-before "$NOT_BEFORE")
 [[ -n "$SILENT" ]] && args+=(--silent)

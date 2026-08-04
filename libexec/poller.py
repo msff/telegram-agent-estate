@@ -41,7 +41,7 @@ unit-tested without the library or the network. The async runtime lazy-imports
 `telegram` so those tests need nothing installed.
 
 Run (the supervisor does this; token comes from the instance's token_file):
-    <python> bin/poller.py --instance=<name> --config=<instance.yaml>
+    <python> libexec/poller.py --instance=<name> --config=<instance.yaml>
 
 `--instance` is load-bearing rather than cosmetic — see main().
 """
@@ -70,10 +70,10 @@ def log(msg, err=False):
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}",
           file=sys.stderr if err else sys.stdout, flush=True)
 
-BINDIR = Path(__file__).resolve().parent
-TURN_RUNNER = BINDIR / "turn_runner.py"
+LIBEXEC = Path(__file__).resolve().parent
+TURN_RUNNER = LIBEXEC / "turn_runner.py"
 
-sys.path.insert(0, str(BINDIR))
+sys.path.insert(0, str(LIBEXEC))
 
 import instance_config  # noqa: E402
 import turn_runner  # noqa: E402  (the receipt WAL — journal-on-receipt)

@@ -44,7 +44,7 @@ import yaml
 import instance_config
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-BIN = PLUGIN_ROOT / "bin"
+LIBEXEC = PLUGIN_ROOT / "libexec"
 REQUIREMENTS = PLUGIN_ROOT / "requirements.txt"
 
 # The five shell entry points, and an argv that makes each one reach — and then
@@ -223,7 +223,7 @@ class Instance:
 
 def run_entry(inst, script, *, path=None, args=None, env_extra=None, timeout=60):
     """Run one entry point to completion. `supervisor.sh` gets special handling."""
-    argv = [str(BIN / script)] + (args if args is not None
+    argv = [str(LIBEXEC / script)] + (args if args is not None
                                   else ENTRY_POINTS[script](str(inst.config)))
     env = inst.env(path=path, extra=env_extra)
     if script == "supervisor.sh":
@@ -385,7 +385,7 @@ echo '{"ok":true,"result":{"pending_update_count":7}}'
     poller = subprocess.Popen([sys.executable, str(fake_poller), "--instance=alpha"])
     try:
         res = _run_supervisor(
-            inst, [str(BIN / "supervisor.sh"), str(inst.config)], inst.env(),
+            inst, [str(LIBEXEC / "supervisor.sh"), str(inst.config)], inst.env(),
             timeout=45, until="backlog=")
     finally:
         poller.terminate()
@@ -521,7 +521,7 @@ def test_no_shell_entry_point_shells_out_to_env_python3(script):
     `supervisor.sh`'s backlog probe and `install-instance.sh`'s second heredoc
     are not the config bootstrap and were both live `/usr/bin/env python3` calls.
     """
-    text = (BIN / script).read_text(encoding="utf-8")
+    text = (LIBEXEC / script).read_text(encoding="utf-8")
     code = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
     assert "/usr/bin/env python3" not in code, script
     assert not re.search(r"(?<![-\w/])python3\s", code), script
@@ -535,7 +535,7 @@ def _requirement_lines():
 
 
 def test_requirements_declares_the_audited_set_with_floors_and_ceilings():
-    """Every third-party import in bin/ and tests/, pinned at both ends.
+    """Every third-party import in libexec/ and tests/, pinned at both ends.
 
     An open ceiling is not a small risk here: `python-telegram-bot` rewrites its
     API across majors and `poller.py` imports narrow surfaces from it, so the

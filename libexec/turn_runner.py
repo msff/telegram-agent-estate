@@ -61,9 +61,9 @@ from collections import namedtuple
 from datetime import datetime, timezone
 from pathlib import Path
 
-BINDIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(BINDIR))
-PLUGIN_ROOT = BINDIR.parent
+LIBEXEC = Path(__file__).resolve().parent
+sys.path.insert(0, str(LIBEXEC))
+PLUGIN_ROOT = LIBEXEC.parent
 
 import instance_config  # noqa: E402
 import msg_index  # noqa: E402  (U8 retry-safety: query the send journal)
@@ -754,7 +754,7 @@ def _default_alert(text):
     """Direct Bot API notice to the owner (not a Claude turn). Reuses the
     sanctioned send primitive, which journals and is owner-allowlisted."""
     try:
-        sys.path.insert(0, str(BINDIR))
+        sys.path.insert(0, str(LIBEXEC))
         import send
         send.reply(text)
     except Exception as exc:  # never let an alert failure break the drain

@@ -4,7 +4,7 @@
 and it is what a freshly-installed instance runs to prove itself.
 
 It is a straight copy from `first-instance/tests/` today and still imports
-that instance's modules. U13 parameterizes it by instance config (`bin/parity.sh
+that instance's modules. U13 parameterizes it by instance config (`libexec/parity.sh
 <instance.yaml> [--real]`) so any instance can run it.
 
 Two modes, and the difference matters:
