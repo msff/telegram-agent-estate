@@ -1,14 +1,29 @@
 {
   "name": "telegram-agent-estate",
+  "description": "One plugin: run a personal Claude agent as a Telegram-driven daemon on macOS. An owned long-poll receiver journals every inbound message to a durable receipt WAL; a flock-serialized runner answers it with one `claude -p --resume` per turn. Crash-safe, exactly-once, subscription-billed.",
   "owner": {
     "name": "ms",
+    "email": "you@example.com",
     "url": "https://github.com/msff"
   },
   "plugins": [
     {
       "name": "telegram-agent-estate",
       "source": "./",
-      "description": "Run a personal Claude agent as a Telegram-driven daemon: receipt WAL in, one `claude -p --resume` per turn out. Crash-safe, exactly-once, subscription-billed."
+      "description": "Run a personal Claude agent as a Telegram-driven daemon: receipt WAL in, one `claude -p --resume` per turn out. Crash-safe, exactly-once, subscription-billed. macOS + launchd only.",
+      "version": "0.2.0",
+      "homepage": "https://github.com/msff/telegram-agent-estate",
+      "license": "MIT",
+      "keywords": [
+        "telegram",
+        "daemon",
+        "launchd",
+        "macos",
+        "agent",
+        "gateway",
+        "headless",
+        "wal"
+      ]
     }
   ]
 }

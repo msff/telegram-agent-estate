@@ -1,24 +1,23 @@
 {
   "name": "telegram-agent-estate",
-  "version": "0.1.0",
-  "description": "Run a personal Claude agent as a Telegram-driven daemon: an owned long-poll receiver journals every inbound message to a durable receipt WAL, and a flock-serialized runner answers it with one `claude -p --resume` per turn. Crash-safe, exactly-once, subscription-billed. One plugin, many instances.",
+  "version": "0.2.0",
+  "description": "Run a personal Claude agent as a Telegram-driven daemon: an owned long-poll receiver journals every inbound message to a durable receipt WAL, and a flock-serialized runner answers it with one `claude -p --resume` per turn. Crash-safe, exactly-once, subscription-billed. One plugin, many instances. macOS + launchd only.",
   "author": {
     "name": "ms",
-    "email": "you@example.com"
+    "email": "you@example.com",
+    "url": "https://github.com/msff"
   },
+  "homepage": "https://github.com/msff/telegram-agent-estate",
+  "repository": "https://github.com/msff/telegram-agent-estate",
+  "license": "MIT",
   "keywords": [
     "telegram",
     "daemon",
     "launchd",
+    "macos",
     "agent",
     "gateway",
     "headless",
     "wal"
-  ],
-  "tryAsking": [
-    "Set up a new Telegram agent instance for this repo",
-    "Why did my bot not answer the last message?",
-    "Run the parity suite against this instance",
-    "Add an MCP tool to this instance's permission allowlist"
   ]
 }

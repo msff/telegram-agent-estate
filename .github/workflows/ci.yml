@@ -1,0 +1,218 @@
+# CI for telegram-agent-estate.
+#
+# ---------------------------------------------------------------------------
+# WHY macOS AND NOTHING ELSE.
+#
+# The suite is platform-bound and not incidentally so: launchd is the
+# scheduler, `plutil` parses the rendered plists, BSD `stat` flags read their
+# modes, and several entry points are zsh-only. On an ubuntu runner this repo
+# fails at `launchctl: command not found` — a red build that says nothing
+# about the change that triggered it. macOS runners are billed at a multiplier
+# on private repos and are free on public ones; this repo is public.
+#
+# ---------------------------------------------------------------------------
+# WHY THERE IS NO `ANTHROPIC_API_KEY` ANYWHERE IN THIS FILE.
+#
+# Every turn this project runs authenticates through the keychain OAuth
+# credential and is billed to that subscription. An API key in the environment
+# silently moves billing off it, which is why the turn runner strips the
+# variable unconditionally. "Add a repository secret" is therefore not an
+# available fix for anything here, and the `no-api-key` step below makes that
+# prohibition executable rather than a comment somebody edits away.
+#
+# `claude plugin validate` needs no credential at all — verified by running it
+# under a throwaway $HOME with no config and no login state, where it still
+# produced full findings and the correct exit code. It is a local manifest
+# check, not an API call.
+
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  # The drift job is the reason this schedule exists; see its own comment.
+  # NOTE: GitHub disables scheduled workflows in a public repo after 60 days
+  # with no commits, which is exactly when this job would start earning its
+  # keep. If the repo goes quiet, re-enable it from the Actions tab.
+  schedule:
+    - cron: "23 13 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # --------------------------------------------------------------------------
+  # The manifests. Cheap, has no Python in it, and is the gate the plugin
+  # marketplace itself applies — a repo that fails this cannot be installed.
+  validate:
+    name: plugin validate --strict
+    runs-on: macos-latest
+    env:
+      # A native install auto-updates in the background. In CI that means the
+      # binary can change between the version this job PRINTS and the version
+      # it VALIDATES with, so a red build could name a version that never ran.
+      DISABLE_AUTOUPDATER: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse to run with an API key in the environment
+        id: no-api-key
+        run: |
+          set -euo pipefail
+          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "::error::ANTHROPIC_API_KEY is set in this job's environment." \
+                 "This project is subscription-billed by design and nothing" \
+                 "here may run against an API key. Remove the secret."
+            exit 1
+          fi
+          echo "no API key in the environment — good"
+
+      # The `claude` CLI is in NO GitHub runner image, so CI has to fetch it.
+      # This is Anthropic's native installer; it drops a versioned build under
+      # ~/.local/share/claude and links ~/.local/bin/claude, which is not on
+      # PATH until we say so. Alternatives, both real:
+      #   curl -fsSL https://claude.ai/install.sh | bash -s <version>   # pinned
+      #   npm install -g @anthropic-ai/claude-code                      # npm
+      # (Node is preinstalled on the macOS images.) Unpinned latest is used
+      # deliberately: CI should meet the CLI the way a person installing this
+      # plugin today meets it, and the supervisor's version tripwire exists
+      # precisely because that version moves. If a CLI release ever breaks
+      # validation and the fix has to wait, pin here with `-s <version>` and
+      # leave a dated comment saying why.
+      #
+      # Note there is also an official `anthropics/claude-code-action`. It is
+      # for RUNNING Claude against a repo, not for installing the CLI, and it
+      # wants a credential — which this project cannot supply. Not usable here.
+      - name: Install the claude CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Show the CLI version under test
+        run: claude --version
+
+      - name: Validate the plugin and marketplace manifests
+        run: claude plugin validate . --strict
+
+  # --------------------------------------------------------------------------
+  # The suite, against the declared dependency set. 3.11 is the declared floor
+  # and is tested because the README makes a promise about it; the second leg
+  # catches what a current interpreter deprecates out from under us.
+  suite:
+    name: pytest (python ${{ matrix.python }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse to run with an API key in the environment
+        run: |
+          set -euo pipefail
+          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "::error::ANTHROPIC_API_KEY is set in this job's environment."
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # One venv from requirements.txt alone — the same build a user gets, and
+      # the reason no test may depend on a package that file does not name.
+      - name: Build the instance venv
+        run: |
+          set -euo pipefail
+          python3 -m venv .venv
+          .venv/bin/python3 -m pip install --upgrade pip
+          .venv/bin/python3 -m pip install -r requirements.txt
+
+      - name: Run the suite
+        run: .venv/bin/python3 -m pytest tests/ -q
+
+  # --------------------------------------------------------------------------
+  # DEPENDENCY DRIFT — scheduled, and that is the whole point.
+  #
+  # Push-triggered CI stops emitting signal the moment pushes stop, which is
+  # exactly the period in which a new major of a declared dependency ships and
+  # reaches a stranger's first install rather than the maintainer's screen.
+  # This job installs the four packages by NAME ONLY, with no bounds at all,
+  # on a current interpreter — then does two things:
+  #
+  #   1. compares what pip resolved against the ceilings requirements.txt
+  #      declares, and fails when anything landed outside one. That is a
+  #      signal even when the new major happens not to break us;
+  #   2. runs the suite anyway, which is the signal when it does.
+  #
+  # A failure here is not necessarily a bug: usually it means a ceiling needs
+  # reviewing and raising, deliberately, with the suite as the evidence.
+  drift:
+    name: unpinned install (scheduled)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install every declared dependency UNPINNED
+        run: |
+          set -euo pipefail
+          python3 -m venv .venv
+          .venv/bin/python3 -m pip install --upgrade pip packaging
+          # names only — every bound in requirements.txt deliberately dropped
+          .venv/bin/python3 - <<'PY' > /tmp/names.txt
+          from pathlib import Path
+          import re
+          for line in Path("requirements.txt").read_text().splitlines():
+              line = line.split("#")[0].strip()
+              if line:
+                  print(re.split(r"[<>=!~\[]", line, maxsplit=1)[0].strip())
+          PY
+          cat /tmp/names.txt
+          xargs .venv/bin/python3 -m pip install --upgrade < /tmp/names.txt
+
+      - name: Report what resolved, and fail on anything past a declared ceiling
+        run: |
+          set -euo pipefail
+          .venv/bin/python3 - <<'PY'
+          import sys
+          from importlib.metadata import version
+          from pathlib import Path
+          from packaging.requirements import Requirement
+
+          drifted = []
+          for line in Path("requirements.txt").read_text().splitlines():
+              line = line.split("#")[0].strip()
+              if not line:
+                  continue
+              req = Requirement(line)
+              have = version(req.name)
+              mark = "ok " if have in req.specifier else "OUT"
+              print(f"{mark} {req.name}: resolved {have}, declared {req.specifier}")
+              if mark == "OUT":
+                  drifted.append(f"{req.name} {have} is outside {req.specifier}")
+
+          if drifted:
+              print("\n::error::dependency drift past a declared ceiling:")
+              for d in drifted:
+                  print(f"  {d}")
+              print("Raise the ceiling deliberately, with the suite as evidence "
+                    "— do not widen it to make this green.")
+              sys.exit(1)
+          PY
+
+      - name: Run the suite against the unpinned set
+        run: .venv/bin/python3 -m pytest tests/ -q

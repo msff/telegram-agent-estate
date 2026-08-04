@@ -148,6 +148,9 @@ templates/
   CLAUDE-ops-section.md   paste into the instance's CLAUDE.md
 skills/setup/       install / migrate / troubleshoot skill
 tests/              the parity suite, doubling as per-instance self-test
+.github/workflows/  macOS CI: manifest validation, the suite, dependency drift
+LICENSE             MIT
+SECURITY.md         where to report a vulnerability, and what counts as one
 ```
 
 ## Commands
@@ -168,3 +171,42 @@ Arguments and exit codes pass through the dispatcher unchanged.
 The usual entry point is not either of these, though: ask Claude to set up an
 instance and the `setup` skill drives the whole flow, including the disclosures
 above, before anything is written.
+
+## Releases, and what a pin means
+
+**A tag is the unit of distribution.** Nothing here installs from a branch, and
+nothing self-updates. If you are running this, you are running a tag someone
+chose, and it stays that way until you say otherwise.
+
+**Cutting one.** The version in `.claude-plugin/plugin.json` is the source of
+truth; the plugin entry in `.claude-plugin/marketplace.json` repeats it and a
+test fails when the two disagree. To release: bump both, get
+`claude plugin validate . --strict` and the suite green, commit, then tag the
+commit `v` + that exact version — v0.2.0 for version 0.2.0 — and push the tag.
+
+Semantics are ordinary semver with the 0.x caveat that applies honestly here:
+while the major is 0, a minor bump is where a breaking change lands, and there
+will be breaking changes — the instance config schema, the layout on disk, and
+the dispatcher's verb list are all still moving.
+
+**The version must actually change on every release**, even for a docs-only
+fix. Installed plugins land in `~/.claude/plugins/cache/<marketplace>/<plugin>/`
+under **a directory named for the version, one per version, old ones left in
+place**. Publish twice under one version number and an installer can resolve a
+directory that already exists and never fetch what you shipped.
+
+**A pin is a commit SHA, not a tag name.** The checkout that launchd actually
+executes is provisioned at a resolved SHA and the stamp file records that SHA,
+not the tag it came from. This is not pedantry: a git tag is mutable, can be
+moved server-side with no signal on your machine, and what sits behind this one
+is code that runs as you, on a timer, unattended. A tag names a release; the
+SHA is what you are running.
+
+**Upgrading is explicit, always.** There is no auto-update path and there will
+not be one — a daemon whose code changes underneath it without a restart is the
+exact failure this project is built to eliminate. An upgrade fetches, verifies
+that the checked-out HEAD is the SHA that was asked for, and restarts the
+supervisors, in that order.
+
+**Only the latest tag is supported.** There is no backport branch; see
+[`SECURITY.md`](SECURITY.md) for what that means when the fix is a security one.
