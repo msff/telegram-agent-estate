@@ -13,9 +13,12 @@ import yaml
 import instance_config
 import msg_index
 import poller as telegram_poll
-import send as send_transaction
+import send
 
-OWNER = 10000000001
+# A chat id that belongs to nobody. The author's real owner id used to sit
+# here, which reads as a neutral fixture value right up until a stranger
+# runs the suite against their own instance.
+OWNER = 10_000_000_001
 OTHER = 999999
 
 
@@ -57,7 +60,7 @@ def test_owner_message_builds_block():
     block = telegram_poll.block_from_message_dict(_msg(), OWNER)
     assert block is not None
     assert block.startswith('<channel source="telegram"')
-    assert 'chat_id="10000000001"' in block
+    assert f'chat_id="{OWNER}"' in block
     assert 'message_id="120"' in block
     assert "\nпривет\n</channel>" in block
 
@@ -149,10 +152,10 @@ def test_reply_sends_and_journals_a_raw_record(monkeypatch):
     def fake_append_raw(chat_id, message_id, text, *a, **k):
         journaled.update(chat_id=chat_id, message_id=message_id, text=text)
 
-    monkeypatch.setattr(send_transaction, "bot_api_sender", fake_sender)
-    monkeypatch.setattr(send_transaction.msg_index, "append_raw", fake_append_raw)
+    monkeypatch.setattr(send, "bot_api_sender", fake_sender)
+    monkeypatch.setattr(send.msg_index, "append_raw", fake_append_raw)
 
-    mid = send_transaction.reply("давай обсудим", chat_id=OWNER)
+    mid = send.reply("давай обсудим", chat_id=OWNER)
     assert mid == 5551
     assert sent == {"chat_id": OWNER, "text": "давай обсудим"}
     # the reply is journaled so a later quote-reply to it resolves
@@ -282,12 +285,12 @@ def test_file_id_picks_largest_photo_and_finds_documents():
 
 
 def test_reply_defaults_to_owner_chat(monkeypatch):
-    monkeypatch.setattr(send_transaction, "bot_api_sender",
+    monkeypatch.setattr(send, "bot_api_sender",
                         lambda chat_id, text, **_kw: 1)
-    monkeypatch.setattr(send_transaction.msg_index, "append_raw",
+    monkeypatch.setattr(send.msg_index, "append_raw",
                         lambda *a, **k: None)
     # default_chat_id comes from the instance config (== OWNER)
-    assert send_transaction.default_chat_id() == OWNER
+    assert send.default_chat_id() == OWNER
 
 
 # --- U11: offset ownership (journal-before-ack) ------------------------------

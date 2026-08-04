@@ -7,7 +7,10 @@ import instance_config
 import msg_index
 from estate_client import append_jsonl, read_jsonl
 
-CHAT = 10000000001
+# A chat id that belongs to nobody. The author's real owner id used to sit
+# here, which reads as a neutral fixture value right up until a stranger
+# runs the suite against their own instance.
+CHAT = 10_000_000_001
 
 
 def write_instance(tmp_path, **over):

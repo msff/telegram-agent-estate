@@ -57,7 +57,24 @@ print(f"WORKDIR={q(c.workdir)}")
 PY
 )" || { echo "failed to load instance config $CONFIG" >&2; exit 2; }
 
-echo "[parity:$NAME] config=$CONFIG mode=${REAL:+real}${REAL:-fast}"
+MODE="fast"
+[[ -n "$REAL" ]] && MODE="real"
+echo "[parity:$NAME] config=$CONFIG mode=$MODE"
+
+# THIS SCRIPT IS AUTHORITATIVE ABOUT THE MODE. The suite reads
+# ESTATE_PARITY_REAL, so a variable left exported by an earlier drill would turn
+# a plain `parity.sh <config>` into a run that spends tokens and sends real
+# messages. Set it from the flag, or clear it — never inherit it.
+if [[ -n "$REAL" ]]; then
+  export ESTATE_PARITY_REAL=1
+  # Real mode needs to know WHICH instance it is drilling: it borrows that
+  # instance's workdir, permission allowlist and MCP config, because proving the
+  # allowlist complete is the entire reason the mode exists. This is the config
+  # already loaded above — passing anything else would drill a different bot.
+  export ESTATE_PARITY_LIVE_CONFIG="$CONFIG"
+else
+  unset ESTATE_PARITY_REAL ESTATE_PARITY_LIVE_CONFIG
+fi
 
 # The turn's billing must stay on the subscription (KTD1). An API key in the
 # environment would silently move a --real run onto metered credits.
@@ -68,7 +85,12 @@ unset TELEGRAM_BOT_TOKEN
 
 cd "$WORKDIR" || { echo "missing workdir $WORKDIR" >&2; exit 1; }
 
-args=(-m pytest "$PLUGIN_ROOT/tests/test_gateway_parity.py" -q)
+# `--rootdir` is not cosmetic here. pytest only loads conftest.py files at or
+# below the rootdir, and the rootdir it infers from a single test-file argument
+# is `tests/` — which leaves the plugin's own conftest.py, the file that
+# DECLARES `--real`, unloaded. Without this the flag below is rejected as an
+# unrecognized argument and the run dies before collection.
+args=(-m pytest --rootdir "$PLUGIN_ROOT" "$PLUGIN_ROOT/tests/test_gateway_parity.py" -q)
 [[ -n "$REAL" ]] && args+=(--real)
 
 PYTHONPATH="$BINDIR${PYTHONPATH:+:$PYTHONPATH}" "$VENV_PY" "${args[@]}"

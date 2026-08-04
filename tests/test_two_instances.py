@@ -286,11 +286,15 @@ def test_installer_renders_valid_plists_for_both_instances(pair, tmp_path):
             capture_output=True, text=True, env=env, timeout=120)
         assert proc.returncode == 0, proc.stdout + proc.stderr
 
+    # Derived, not spelled out. These filenames used to be four literals
+    # carrying the author's reverse domain, so the test asserted a personal
+    # default rather than the property it is about: that the installer names
+    # every plist the way `instance_config` says, one per instance and one per
+    # that instance's schedules.
+    expected = sorted(f"{c.launchd_label(job)}.plist"
+                      for c in (a, b) for job in (None, "morning-digest"))
     plists = sorted(p.name for p in agents.glob("*.plist"))
-    assert plists == [
-        "com.example.alpha-morning-digest.plist", "com.example.alpha.plist",
-        "com.example.beta-morning-digest.plist", "com.example.beta.plist",
-    ]
+    assert plists == expected
     for p in agents.glob("*.plist"):
         lint = subprocess.run(["plutil", "-lint", str(p)], capture_output=True, text=True)
         assert lint.returncode == 0, f"{p.name}: {lint.stdout}{lint.stderr}"

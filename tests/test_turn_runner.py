@@ -24,7 +24,10 @@ import instance_config
 import msg_index
 import turn_runner as tr
 
-OWNER = 10000000001
+# A chat id that belongs to nobody. The author's real owner id used to sit
+# here, which reads as a neutral fixture value right up until a stranger
+# runs the suite against their own instance.
+OWNER = 10_000_000_001
 
 
 def write_instance(tmp_path, **over):
@@ -72,7 +75,7 @@ def ok_invoker(session_id="sess-1", reply="ok", record=None, sends=True):
     argv so tests can inspect the prompt (argv[2]).
 
     By default it also stamps the send journal with the turn id, mirroring what
-    a real turn does when it calls `send_transaction.reply` — the runner treats
+    a real turn does when it shells out to `send.py` — the runner treats
     that stamp, not the exit status, as delivery truth. Pass sends=False to
     simulate a turn that exits 0 without sending (e.g. its Bash tool was denied
     under dontAsk), which the runner must NOT accept as delivered."""
@@ -353,8 +356,8 @@ def test_second_drain_is_busy_while_lock_held(gw):
 # public plugin whose DEFAULT prime prompt is in a language the installer does
 # not read degrades the one turn that restores context — silently, since that
 # failure leaves no other trace.
-PRIME_MARK = "A new session is starting"   # unique to PRIME_PREFIX
-FLUSH_MARK = "session is rotating"         # unique to FLUSH_PROMPT
+PRIME_MARK = "A new session is starting"   # unique to prime_prefix()
+FLUSH_MARK = "session is rotating"         # unique to flush_prompt()
 
 
 def test_bootstrap_primes_first_turn_then_persists_session(gw):
@@ -757,7 +760,7 @@ def test_shipped_allowlist_template_is_valid_and_denies_the_dangerous_basics():
 # --- U9: scheduled jobs through the gateway ---------------------------------
 
 class FakeGuard:
-    """send_transaction.guard stand-in returning a scripted code."""
+    """guard.guard stand-in returning a scripted code."""
 
     def __init__(self, code=0):
         self.code = code
@@ -806,7 +809,7 @@ def test_scheduler_entry_renders_reply_directive_and_runs_solo(gw):
     s = tr.drain(invoker=ok_invoker(record=calls), alert=silent, probe=no_probe)
     assert s["turns"] == 2                     # message and job never coalesce
     job_prompt = calls[1][2]
-    assert "chat_id=10000000001" in job_prompt   # told where to reply
+    assert f"chat_id={OWNER}" in job_prompt    # told where to reply
     assert "[SCHEDULED] brief" in job_prompt
     assert "hi" not in job_prompt              # no leakage from the user message
 

@@ -1,6 +1,7 @@
 """Scheduling safety (guard.py) and the outbound send primitive (send.py).
 
-Only the generic half of the old `send_transaction` suite came over. The rest
+Only the generic half of the reading instance's original combined
+send/guard suite came over. The rest
 of that file tests the Readwise digest transaction — chunked resume, tag swaps,
 Reader links — which stayed in the reading repo along with the code.
 
@@ -19,7 +20,10 @@ import instance_config
 import msg_index
 import send
 
-CHAT = 10000000001
+# A chat id that belongs to nobody. The author's real owner id used to sit
+# here, which reads as a neutral fixture value right up until a stranger
+# runs the suite against their own instance.
+CHAT = 10_000_000_001
 
 
 def make_cfg(tmp_path, name="alpha", chat=CHAT):
