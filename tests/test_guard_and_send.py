@@ -1,9 +1,9 @@
 """Scheduling safety (guard.py) and the outbound send primitive (send.py).
 
-Only the generic half of the reading instance's original combined
-send/guard suite came over. The rest
-of that file tests the Readwise digest transaction — chunked resume, tag swaps,
-Reader links — which stayed in the reading repo along with the code.
+Only the generic half of the first instance's original combined send/guard
+suite came over. The rest of that file tests its digest transaction — chunked
+resume, tag swaps, per-item deep links — which stayed in that instance's own
+repo along with the code.
 
 The isolation tests at the bottom are new, and they are the ones that matter
 for U13: markers and leases used to be distinct because each instance resolved
@@ -106,8 +106,8 @@ def test_bot_api_sender_payload_shape_and_failure(cfg, monkeypatch):
 
 
 def test_missing_token_names_the_file_it_expected(cfg, monkeypatch):
-    """The old error told the reader to look in a hardcoded first-instance
-    path, which on any other instance is the wrong file."""
+    """The old error told the reader to look in one hardcoded instance's path,
+    which on any other instance is the wrong file."""
     with pytest.raises(send.SendError, match=str(cfg.token_file)):
         send.bot_api_sender(CHAT, "hi", cfg=cfg)
 

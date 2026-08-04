@@ -165,12 +165,17 @@ env_passthrough:
 # Paths must be absolute or `~`-relative — these are NOT resolved against the
 # workdir. `{handoff}` (prime, flush) and `{chat_id}` (reply directive) are
 # substituted into the text; keep the placeholders.
+#
+# `quota_notice` is the odd one out: it is not a prompt but the message the
+# runner sends YOU when it holds a message rather than spend the tail of the
+# usage window. No model composes it, so nothing translates it after the fact.
 
 prompts:
   prime:            # first turn of a session — reads the handoff back in
   flush:            # the silent rotation turn that writes the handoff
   silent_directive: # prefix for a job that must NOT push to Telegram
   reply_directive:  # prefix telling a job where to reply
+  quota_notice:     # owner-facing "holding your message" text (not a prompt)
 
 # --- schedules --------------------------------------------------------------
 #

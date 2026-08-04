@@ -13,8 +13,8 @@
 #
 # Every process-matching pattern in the original was keyed on an absolute script
 # path — correct precisely because each instance had its own checkout, so
-# `pgrep -f /…/first-instance/daemon/telegram_poll.py` could not possibly
-# match the second-instance bot. Under the plugin BOTH instances execute
+# `pgrep -f /…/<one-bot>/daemon/telegram_poll.py` could not possibly match the
+# other bot. Under the plugin BOTH instances execute
 # `<plugin>/libexec/poller.py`, so that same pattern now matches both, and:
 #
 #   - `poller_pid` would return the OTHER instance's poller, so this instance

@@ -2,11 +2,11 @@
 """Shared plumbing for every instance: logging, state roots, JSONL journals,
 sync-conflict detection, and the interactive-activity flag.
 
-Transplanted from `first-instance/scripts/reader_client.py`, which was two
-modules wearing one name: this generic half, and a Readwise Reader API client
-bolted onto it. Only this half is instance-independent, so only this half moved.
-The Readwise client stays in the reading repo, where it belongs — a plugin that
-serves a second-instance coach has no business carrying a bookmarking API.
+Transplanted from the first instance's client module, which was two modules
+wearing one name: this generic half, and a third-party API client bolted onto
+it. Only this half is instance-independent, so only this half moved. The API
+client stays in that instance's own repo, where it belongs — a plugin that also
+serves a coaching bot has no business carrying a bookmarking API.
 
 What changed in the move, all of it the same change: nothing resolves against a
 module-level `REPO_ROOT` any more. Paths come from the instance config, because

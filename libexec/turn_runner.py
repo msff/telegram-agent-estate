@@ -85,9 +85,9 @@ def workdir() -> Path:
 # --- tunables ---------------------------------------------------------------
 # Per-turn wall-clock budgets. The old 300s was sized off U5's ~6s warm turn and
 # was WRONG BY AN ORDER OF MAGNITUDE for real work: on cutover night the evening
-# triage timed out twice at exactly 300s and dead-lettered, because composing a
-# digest means querying Reader, building cards, persisting a payload and sending
-# it. The screen stack had no turn timeout at all — inject.sh simply polled for
+# job timed out twice at exactly 300s and dead-lettered, because composing a
+# digest means querying a remote API, building cards, persisting a payload and
+# sending it. The old stack had no turn timeout at all — it simply polled for
 # the completion marker for ~15 min — so this budget is a NEW constraint the
 # cutover introduced, and it has to be at least as generous as what it replaced.
 #
@@ -100,9 +100,10 @@ def workdir() -> Path:
 # fallbacks. Deliberately not duplicated here: two sources of truth for a number
 # whose wrongness is invisible until a live job dies at exactly the wrong second
 # is not a tradeoff worth making. Each instance must size these against ITS
-# heaviest real job — a second-instance coach pulling three MCP servers and writing a
-# calendar event has a different floor than a reading digest, and copying a
-# number measured on another instance is what produced the 300s timeout.
+# heaviest real job — a coaching bot that pulls three MCP servers and writes a
+# calendar event has a different floor than a bot that composes a reading
+# digest, and copying a number measured on another instance is what produced
+# the 300s timeout.
 
 
 def per_turn_timeout():
@@ -143,20 +144,20 @@ CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 DEFAULT_PERMISSION_MODE = "dontAsk"
 
 # MCP diet (KTD2's "conditional GO" clause, finally acted on). Every turn is a
-# fresh process, so it pays the full MCP handshake every time — and it was
-# booting all SEVEN user-scope servers when this instance's brain uses exactly
-# one. Measured 2026-07-29 on an identical no-tool prompt:
+# fresh process, so it pays the full MCP handshake every time — and on the first
+# instance it was booting all SEVEN of the machine's user-scope servers when
+# that agent's brain used exactly one. Measured on an identical no-tool prompt:
 #     all user-scope servers  27s
 #     --strict-mcp-config     16s
-#     readwise only           16s   <- same as none; the server itself is free
-# So the diet is worth ~11s on EVERY turn, and costs nothing in capability.
+#     the one server it uses  16s   <- same as none; the server itself is free
+# So the diet was worth ~11s on EVERY turn, and cost nothing in capability.
 # --strict-mcp-config is what makes it stick: without it the file below is
 # merged with the user-scope config rather than replacing it.
 #
 # The diet is PER INSTANCE and cannot be inherited: the servers a reading bot
-# needs are not the ones a second-instance coach needs, and the measured saving depends
-# on how many the machine has. U15 gates second-instance's cutover on re-running this
-# measurement with second-instance's own MCP set.
+# needs are not the ones a coaching bot needs, and the saving depends on how
+# many servers the machine has. Re-measure per instance rather than quoting the
+# numbers above — they describe one machine's server set, not yours.
 
 
 def _permission_args(config=None):
@@ -194,8 +195,8 @@ def _mcp_args(config=None):
     return []
 
 # Prompts are per-instance FILES, not literals. Two reasons, both learned here:
-# the text is in the brain's own language (the reading instance's are Cyrillic,
-# to match how it thinks and to avoid colliding with the ASCII tokens the tests
+# the text is in the brain's own language (the first instances' were Cyrillic,
+# to match how they think and to avoid colliding with the ASCII tokens the tests
 # assert on), and it NAMES THE HANDOFF FILE, which is itself configurable. A
 # hardcoded prompt would tell a differently-configured instance to read a file
 # that does not exist — and that turn would cheerfully "succeed" having restored
@@ -233,9 +234,9 @@ def flush_prompt(config=None):
 
 
 # The file the flush turn must actually change. Resolved through the instance
-# config per call, NEVER a module constant: on 2026-07-31 a WORKDIR-derived
-# constant here ignored the test suite's state-dir override, and a plain
-# `pytest tests/` pruned the LIVE handoff file. Reads were harmless while
+# config per call, NEVER a module constant: a WORKDIR-derived constant here once
+# ignored the test suite's state-dir override, and a plain `pytest tests/`
+# pruned a LIVE handoff file. Reads were harmless while
 # nothing wrote through it; the moment rotate() gained a prune step, the
 # redirection gap became a production write from pytest.
 # Tests and the parity drill still override this attribute directly.
@@ -720,6 +721,38 @@ def quota_ok(probe=None):
 
 QUOTA_NOTICE_COOLDOWN = 1800     # seconds between "deferred" notices to the owner
 
+# The deferral notice is a FILE, for the same reason the prompts are: it is
+# owner-facing text, and the owner does not necessarily read English. It is also
+# the one message the gateway composes with no model in the loop, so nothing
+# downstream can translate it after the fact — hardcoded, it is the single place
+# where the installer's language stops mattering, and the failure mode is an
+# owner who sees a bot go quiet and never learns why.
+DEFAULT_QUOTA_NOTICE = PLUGIN_ROOT / "templates" / "prompts" / "quota-notice.txt"
+
+# Last resort only, and deliberately unlike `_prompt_text`, which lets a missing
+# prompt file raise and fail the turn loudly. A prompt drives the model, so a
+# wrong one is worse than none; this string only explains a silence that is
+# already happening, so degrading to English beats raising inside the drain that
+# was trying to be considerate.
+FALLBACK_QUOTA_NOTICE = ("Holding your message: the usage window is nearly "
+                         "spent. I will answer once it resets.")
+
+
+def quota_notice_text(config=None):
+    """The deferral notice: the instance's own file, else the shipped default."""
+    c = config or cfg()
+    override = c.quota_notice_file
+    for path in [p for p in (override, DEFAULT_QUOTA_NOTICE) if p]:
+        try:
+            text = Path(path).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            log(f"turn_runner: quota notice unreadable at {path} ({exc})")
+            continue
+        if text:
+            return text
+    log("turn_runner: no readable quota notice file; using the built-in text")
+    return FALLBACK_QUOTA_NOTICE
+
 
 def _quota_notice_stamp() -> Path:
     return gateway_state_dir() / "quota-notice-at"
@@ -764,12 +797,13 @@ def _default_alert(text):
 # --- turn execution seam ----------------------------------------------------
 
 # Environment handed to a turn. Inheriting the whole shell env hands every turn
-# whatever credentials happen to be exported — a real probe (2026-07-28) found
-# live Gemini, Firecrawl, GitHub PAT, Notion, Exa, Parallel, Fireflies, Mochi
-# and Intervals keys readable from inside a turn. The turn needs almost none of
-# them, so pass an explicit minimal set plus a per-instance passthrough for the
-# credentials that instance genuinely needs (an instance whose MCP servers need
-# a key lists it in ESTATE_ENV_PASSTHROUGH, comma-separated).
+# whatever credentials happen to be exported, and on a working developer machine
+# that is a lot: probing one real setup found nine unrelated third-party API
+# keys readable from inside a turn, not one of which that instance had any use
+# for. Assume the same of yours. So pass an explicit minimal set plus a
+# per-instance passthrough for the credentials that instance genuinely needs (an
+# instance whose MCP servers need a key lists it in ESTATE_ENV_PASSTHROUGH,
+# comma-separated).
 # HOME is required for keychain OAuth (KTD1) and for --resume's project scoping;
 # PATH for the node/claude launcher; the rest keep normal shell behaviour.
 ENV_BASE_KEYS = ("HOME", "PATH", "USER", "SHELL", "LOGNAME", "LANG", "LC_ALL",
@@ -924,11 +958,12 @@ def _write_job_marker(group):
     run_job returns `busy` and the in-flight drain does the work, so a marker
     written by run_job would be either a lie or absent depending on timing.
 
-    Reading's digest jobs also write this marker from inside their R20 send
-    transaction; re-writing the same path here is idempotent. second-instance's jobs
-    reply through the plain send primitive and had no marker at all until this
-    existed — observed live on 2026-08-02, when the 20:00 post-ride check
-    delivered its brief and left no completion evidence behind.
+    A job that sends through a multi-step digest transaction writes this marker
+    from inside that transaction too; re-writing the same path here is
+    idempotent. A job that replies through the plain send primitive has no such
+    transaction, and had no marker at all until this existed — observed live on
+    an instance whose evening job delivered its brief and left no completion
+    evidence behind, so a wake-triggered re-fire would have sent it twice.
 
     CALLED ONLY WHEN THE TURN PRODUCED SEND EVIDENCE. That condition is the
     whole point and is easy to drop by accident: `_owes_reply` deliberately
@@ -1184,9 +1219,7 @@ def drain(*, invoker=None, alert=None, probe=None, output_check=None):
                 # quota-blocked backlog must not turn into a burst of apologies,
                 # and post-cutover the supervisor drains every 30s regardless of
                 # whether anything arrived.
-                alert("⏳ Отложено: 5-часовое окно лимита почти исчерпано, "
-                      "держу сообщение до его сброса, чтобы не уходить в "
-                      "платные кредиты. Отвечу, как только окно освободится.")
+                alert(quota_notice_text())
                 summary["notified"] = 1
             log(f"turn_runner: quota {util:.0%} — {len(groups)} group(s) left "
                 f"pending; they self-heal when the window recovers")
@@ -1410,10 +1443,10 @@ def prune_handoff(path=None, *, keep_snapshots=None, log_tail_bytes=None,
     file, leaving the live handoff small enough to read in one call.
 
     WHAT COUNTS AS A SNAPSHOT IS PER INSTANCE. The agent writes its handoff in
-    its own idiom and the two instances disagree entirely — reading prepends
-    `## Current state (as of 2026-08-02 ...)`, second-instance writes
-    `## Чт 23.07 — утренний бриф ...`. A hardcoded pattern no-ops silently on
-    the other shape, which is exactly what happened: second-instance's handoff reached
+    its own idiom, and two agents can disagree entirely — one prepends
+    `## Current state (as of 2026-08-02 ...)`, another writes dated Cyrillic
+    headers with no year in them. A hardcoded pattern no-ops silently on the
+    other shape, which is exactly what happened: one instance's handoff reached
     2366 lines, past the 2000-line single-Read ceiling, so every recovery was
     reading a truncated head while each nightly prune reported a clean `noop`.
 
@@ -1445,7 +1478,7 @@ def prune_handoff(path=None, *, keep_snapshots=None, log_tail_bytes=None,
     # rather than trusting file order, so a hand-edit that moves a block cannot
     # silently retire the newest state; undated headers are never dropped.
     # `file` trusts newest-first file order, which is the only option for a
-    # handoff whose headers carry no parseable year (second-instance's `## Чт 23.07 —`).
+    # handoff whose headers carry no parseable year (`## Чт 23.07 —`).
     ranked = []
     for i, sec in enumerate(sections):
         if not snap_re.match(sec[0]):

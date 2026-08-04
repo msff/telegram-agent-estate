@@ -267,6 +267,66 @@ def test_quota_probe_unreadable_fails_open(gw):
     assert s["status"] == "ok" and len(calls) == 1      # None reading -> proceed
 
 
+# --- the deferral notice is a file, like every other owner-facing string -----
+
+def test_quota_notice_falls_back_to_the_shipped_default(gw):
+    """Unset override -> the plugin's own English file, not a literal in the
+    source. It shipped as a hardcoded Russian sentence, which made it the one
+    user-facing string an installer could not change without editing code."""
+    text = tr.quota_notice_text()
+    shipped = tr.DEFAULT_QUOTA_NOTICE.read_text(encoding="utf-8").strip()
+    assert text == shipped and text
+    assert text != tr.FALLBACK_QUOTA_NOTICE, "the shipped file was not read"
+
+
+def test_quota_notice_renders_from_the_instance_override(gw, tmp_path,
+                                                         monkeypatch):
+    mine = tmp_path / "my-notice.txt"
+    mine.write_text("Подожду, окно почти исчерпано.\n", encoding="utf-8")
+    monkeypatch.setenv(instance_config.CONFIG_ENV,
+                       str(write_instance(tmp_path,
+                                          prompts={"quota_notice": str(mine)})))
+    assert tr.quota_notice_text() == "Подожду, окно почти исчерпано."
+
+
+def test_the_override_is_what_the_owner_actually_receives(gw, tmp_path,
+                                                          monkeypatch):
+    """The seam is only real if the deferral path uses it. A parameterized
+    loader nothing calls is the same bug in a nicer shape."""
+    mine = tmp_path / "my-notice.txt"
+    mine.write_text("HOLDING\n", encoding="utf-8")
+    monkeypatch.setenv(instance_config.CONFIG_ENV,
+                       str(write_instance(tmp_path,
+                                          prompts={"quota_notice": str(mine)})))
+    tr.journal_inbound(1, "message", OWNER, block("hi", 1))
+    alerts = []
+    s = tr.drain(invoker=ok_invoker(), alert=alerts.append, probe=lambda: 0.95)
+    assert s["status"] == "quota_deferred"
+    assert alerts == ["HOLDING"]
+
+
+def test_an_unreadable_notice_degrades_instead_of_breaking_the_drain(
+        gw, tmp_path, monkeypatch):
+    """Deliberately unlike a missing PROMPT, which raises and fails the turn.
+
+    A prompt drives the model, so a wrong one is worse than a loud failure.
+    This string only explains a silence that is already happening, so raising
+    inside the drain that was trying to be considerate would turn a courtesy
+    into an outage."""
+    monkeypatch.setenv(instance_config.CONFIG_ENV,
+                       str(write_instance(
+                           tmp_path,
+                           prompts={"quota_notice": str(tmp_path / "gone.txt")})))
+    monkeypatch.setattr(tr, "DEFAULT_QUOTA_NOTICE", tmp_path / "also-gone.txt")
+    assert tr.quota_notice_text() == tr.FALLBACK_QUOTA_NOTICE
+
+    tr.journal_inbound(1, "message", OWNER, block("hi", 1))
+    alerts = []
+    s = tr.drain(invoker=ok_invoker(), alert=alerts.append, probe=lambda: 0.95)
+    assert s["status"] == "quota_deferred"
+    assert alerts == [tr.FALLBACK_QUOTA_NOTICE]
+
+
 # --- backend seam + billing leak flip (KTD11) -------------------------------
 
 def test_backend_selector_defaults_A_and_B_not_implemented(gw):
@@ -538,21 +598,21 @@ def test_failed_turn_that_already_sent_is_not_reinvoked(gw):
 # --- U8r: turns must not inherit the machine's credentials -------------------
 
 def test_child_env_drops_unrelated_credentials(gw, monkeypatch):
-    monkeypatch.setenv("GITHUB_PAT", "ghp_secret")
-    monkeypatch.setenv("NOTION_TOKEN", "ntn_secret")
+    monkeypatch.setenv("SOME_VENDOR_PAT", "pat_secret")
+    monkeypatch.setenv("ANOTHER_VENDOR_TOKEN", "tok_secret")
     monkeypatch.setenv("ESTATE_TURN_ID", "tid-1")
     env = tr._child_env()
-    assert "GITHUB_PAT" not in env and "NOTION_TOKEN" not in env
+    assert "SOME_VENDOR_PAT" not in env and "ANOTHER_VENDOR_TOKEN" not in env
     assert env["ESTATE_TURN_ID"] == "tid-1"     # the anchor still gets through
     assert "HOME" in env and "PATH" in env       # OAuth + launcher still work
 
 
 def test_child_env_honours_instance_passthrough(gw, monkeypatch):
-    monkeypatch.setenv("INTERVALS_API_KEY", "k")
+    monkeypatch.setenv("EXAMPLE_SERVICE_API_KEY", "k")
     monkeypatch.setenv("GITHUB_PAT", "ghp_secret")
-    monkeypatch.setenv("ESTATE_ENV_PASSTHROUGH", "INTERVALS_API_KEY")
+    monkeypatch.setenv("ESTATE_ENV_PASSTHROUGH", "EXAMPLE_SERVICE_API_KEY")
     env = tr._child_env()
-    assert env["INTERVALS_API_KEY"] == "k"       # instance opted this one in
+    assert env["EXAMPLE_SERVICE_API_KEY"] == "k"       # instance opted this one in
     assert "GITHUB_PAT" not in env               # everything else still dropped
 
 
@@ -987,7 +1047,7 @@ def test_mcp_args_restrict_and_replace(gw, tmp_path, monkeypatch):
     27s -> 16s). --strict-mcp-config is required alongside --mcp-config, or the
     file MERGES with the user-scope config instead of replacing it."""
     cfg = tmp_path / "mcp.json"
-    cfg.write_text('{"mcpServers":{"readwise":{"type":"http","url":"x"}}}')
+    cfg.write_text('{"mcpServers":{"example":{"type":"http","url":"x"}}}')
     monkeypatch.setenv("ESTATE_MCP_CONFIG", str(cfg))
     args = tr._mcp_args()
     assert args == ["--strict-mcp-config", "--mcp-config", str(cfg)]
@@ -1013,7 +1073,7 @@ def test_turn_argv_carries_permission_and_mcp_flags(gw, tmp_path, monkeypatch):
 
 # --- handoff pruning ---------------------------------------------------------
 
-HANDOFF_SAMPLE = """# Session handoff — first-instance
+HANDOFF_SAMPLE = """# Session handoff — example-instance
 
 Read this first on startup.
 
@@ -1236,9 +1296,9 @@ def test_a_successful_scheduled_job_writes_its_completion_marker(gw, tmp_path):
     """The marker is a scheduled job's completion truth: guard() reads it to
     refuse a duplicate, and reconciliation reads it to prove the job finished.
 
-    second-instance's jobs reply through the plain send primitive rather than a digest
-    transaction, so nothing wrote one — observed live 2026-08-02, when the 20:00
-    post-ride check delivered its brief and left no evidence it had run. A
+    A job that replies through the plain send primitive rather than a digest
+    transaction had nothing writing one — observed live on an instance whose
+    evening job delivered its brief and left no evidence it had run. A
     wake-triggered re-fire would then have sent the same brief twice."""
     import guard as guard_mod
     from datetime import datetime

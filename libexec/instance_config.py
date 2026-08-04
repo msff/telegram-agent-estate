@@ -8,8 +8,8 @@ label, or a process-match pattern.
 
 WHY THIS IS THE DANGEROUS FILE. Before the plugin, two instances were two
 separate checkouts, so their processes were distinguishable by path alone:
-`pgrep -f first-instance/daemon/telegram_poll.py` could not possibly match
-the second-instance bot. Under the plugin BOTH instances execute the same
+`pgrep -f <one-bot's-checkout>/daemon/telegram_poll.py` could not possibly match
+the other bot. Under the plugin BOTH instances execute the same
 `libexec/poller.py`, so every sweep, liveness probe, and kill that matches on the
 executable path now matches BOTH — a supervisor restarting its poller would
 reap the other bot's. That is the R5/R18 failure class, and it is created by
@@ -19,9 +19,9 @@ that, and `install-instance.sh` refuses to install two instances sharing a name.
 
 RESOLUTION IS THROUGH FUNCTIONS, NEVER MODULE CONSTANTS. A constant computed at
 import time cannot follow an environment override, and the tests redirect state
-via the environment. That is not a hypothetical: on 2026-07-31 a WORKDIR-derived
-`HANDOFF_PATH` constant in the reading runner ignored the test suite's state-dir
-override, and a plain `pytest tests/` pruned the LIVE production handoff file.
+via the environment. That is not a hypothetical: a WORKDIR-derived
+`HANDOFF_PATH` constant in the runner once ignored the test suite's state-dir
+override, and a plain `pytest tests/` pruned a LIVE production handoff file.
 It was harmless only for as long as nothing wrote through that path. Read the
 config through `load()`; do not cache it in a module global.
 """
@@ -126,11 +126,11 @@ class InstanceConfig:
 
         Matches the tag rather than the script path, and includes `poller.py`
         so a stray shell whose argv merely mentions the instance cannot pass for
-        a live poller. The reading instance shipped a probe that matched a bare
-        string and counted the supervisor's own grep as a healthy poller; it was
-        then over-corrected into matching a path that a python process no longer
-        had. Both bugs were a probe describing something other than "this
-        instance's poller process".
+        a live poller. An earlier probe matched a bare string and counted the
+        supervisor's own grep as a healthy poller; it was then over-corrected
+        into matching a path that a python process no longer had. Both bugs were
+        a probe describing something other than "this instance's poller
+        process".
         """
         return f"poller\\.py.*{self.instance_tag()}"
 
@@ -166,7 +166,7 @@ class InstanceConfig:
         """Synced state the AGENT itself reads and writes, e.g. the handoff.
 
         A genuinely different thing from `gateway_state_dir`, and the two are
-        easy to confuse — the reading instance carries two same-shaped
+        easy to confuse — the codebase this came from carried two same-shaped
         `state_dir()` helpers in different modules for exactly this reason.
         Rule of thumb: if the model reads it, it lives here; if only the
         plumbing reads it, it lives in the gateway dir.
@@ -245,6 +245,19 @@ class InstanceConfig:
         p = _dig(self._data, "prompts.reply_directive")
         return _expand(p) if p else None
 
+    @property
+    def quota_notice_file(self):
+        """Override for the owner-facing quota-deferral notice.
+
+        Not a prompt — it is the one string the runner puts in front of a human
+        with no model in the loop, which is exactly why it needs the same file
+        seam the prompts have. Hardcoded, it is the single place where the
+        installer's language stops mattering, and an owner who cannot read the
+        notice sees only a bot that went quiet.
+        """
+        p = _dig(self._data, "prompts.quota_notice")
+        return _expand(p) if p else None
+
     # --- housekeeping --------------------------------------------------------
 
     @property
@@ -277,16 +290,16 @@ class InstanceConfig:
     @property
     def handoff_snapshot_pattern(self):
         """Regex matching a retirable `## ` section header in THIS instance's
-        handoff. Default is reading's `## Current state (as of ...)`.
+        handoff. Default is `## Current state (as of ...)`.
 
         Instance-specific because the handoff is written by the agent in its own
-        idiom, and the two existing instances disagree completely: reading
-        prepends `## Current state (as of 2026-08-02 ...)`, second-instance writes
+        idiom, and two agents can disagree completely: one prepends
+        `## Current state (as of 2026-08-02 ...)`, another writes
         `## Чт 23.07 — утренний бриф отправлен ...`. A prune hardcoded to one
-        shape silently no-ops on the other — which is what happened to second-instance,
-        whose handoff reached 2366 lines (past the 2000-line single-Read
-        ceiling, so recovery was reading a truncated head) while every prune
-        reported a clean `noop`.
+        shape silently no-ops on the other — which is what happened to the
+        second instance, whose handoff reached 2366 lines (past the 2000-line
+        single-Read ceiling, so recovery was reading a truncated head) while
+        every prune reported a clean `noop`.
         """
         return (_dig(self._data, "housekeeping.handoff_snapshot_pattern")
                 or r"^##\s+(?:Current|Earlier)\s+state\b")
@@ -325,7 +338,17 @@ class InstanceConfig:
 
     @property
     def launchd_prefix(self):
-        return self._data.get("launchd_prefix") or "com.example"
+        """Reverse-DNS namespace for this instance's launchd labels.
+
+        The fallback is deliberately `local` and not anyone's real domain: a
+        label prefix is permanent, visible in `launchctl list`, and is what
+        `install-instance.sh` uses to find and unload THIS instance's jobs. A
+        default borrowed from whoever wrote this would quietly file a stranger's
+        daemons under a stranger's namespace. Declare your own in the instance
+        config; `templates/instance.yaml` ships the field spelled out for that
+        reason.
+        """
+        return self._data.get("launchd_prefix") or "local"
 
     def launchd_label(self, job=None):
         base = f"{self.launchd_prefix}.{self.name}"

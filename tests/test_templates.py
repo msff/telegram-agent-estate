@@ -1,10 +1,10 @@
 """The shipped templates, checked as templates rather than as one bot's config.
 
 `templates/` is the only part of this repo a stranger edits by hand, and until
-U2 it was first-instance's live configuration with the comments still
-attached: real chat id, real `/Users/...` paths, three schedules whose prompt
-files did not ship, and an allowlist naming another instance's private scripts.
-Every test here pins one way that regresses.
+U2 it was one live instance's own configuration with the comments still
+attached: a real chat id, real home-directory paths, three schedules whose
+prompt files did not ship, and an allowlist naming that instance's private
+scripts. Every test here pins one way that regresses.
 
 The interesting one is `test_every_key_the_code_reads_is_in_the_template`. It
 walks `instance_config.py` for the KEY LITERALS the accessors read, not for the
@@ -37,6 +37,9 @@ PROMPTS = TEMPLATES / "prompts"
 RUNNER_PROMPTS = ("prime.txt", "flush.txt",
                   "silent-directive.txt", "reply-directive.txt")
 SCHEDULE_PROMPTS = ("morning.txt", "evening.txt", "weekly.txt")
+# Not prompts: owner-facing text the gateway sends with no model in the loop, so
+# nothing downstream can translate it. Same file seam, same language rules.
+NOTICES = ("quota-notice.txt",)
 
 
 def template_data():
@@ -102,9 +105,10 @@ def test_loading_the_template_yields_every_documented_field():
 
 
 def test_launchd_prefix_is_declared_by_the_template_not_inherited():
-    """The code's fallback prefix is the author's reverse domain, so a template
-    that stays silent about this field puts every third-party install under it.
-    Declared explicitly, an installer can see and replace it."""
+    """A label prefix is permanent and visible in `launchctl list`, so a
+    template that stays silent about this field files every install under the
+    code's neutral fallback and nobody ever notices. Declared explicitly, an
+    installer can see it and replace it with their own namespace."""
     data = template_data()
     assert "launchd_prefix" in data, "the template must declare launchd_prefix"
     prefix = data["launchd_prefix"]
@@ -203,15 +207,77 @@ def test_every_key_the_code_reads_is_in_the_template():
 
 
 # --- nothing personal ships --------------------------------------------------
+#
+# THIS FILE IS THE ONE PLACE THE PERSONAL STRINGS ARE ALLOWED TO APPEAR, because
+# it is where they are declared in order to be forbidden everywhere else. The
+# repo-wide sweep below therefore skips itself, and that self-exclusion is the
+# one hole in the sweep — keep the literals here and nowhere else, so the hole
+# stays exactly one file wide.
 
 
 PERSONAL = {
     "the owner chat id": re.compile(r"\b10000000001\b"),
     "the author's home dir": re.compile(r"/Users/example\b"),
     "the author's reverse domain": re.compile(r"\bco\.example\b|\bexample\b"),
-    "another instance's slug": re.compile(r"first-instance|second-instance"),
+    "the author's email": re.compile(r"you@"),
+    "another project's name": re.compile(r"first-instance|second-instance|notes-vault",
+                                         re.IGNORECASE),
     "a synced-folder path": re.compile(r"~/Dropbox|/vault\b"),
 }
+
+# Every external service the author's env-scrubbing probe found a live key for.
+# The finding — "a turn inherits whatever the shell exported, and that is more
+# than you think" — is worth keeping and is kept, in general terms. The
+# INVENTORY is not: a public list of which vendors one machine holds credentials
+# for is a shopping list, and it is useless to a reader who holds different ones.
+CREDENTIALED_SERVICES = re.compile(
+    r"\b(?:readwise|gemini|firecrawl|notion|fireflies|mochi|intervals)\b",
+    re.IGNORECASE)
+
+
+def repo_text_files():
+    """Every tracked-looking text file in the repo, as (relative path, text).
+
+    Walks the working tree rather than asking git, so an untracked file staged
+    for the next commit is swept too — the sweep must be true of what is about
+    to be published, not only of what already was.
+    """
+    skip_dirs = {".git", "__pycache__", ".pytest_cache", ".venv", "venv",
+                 "node_modules"}
+    for path in sorted(PLUGIN_ROOT.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(PLUGIN_ROOT)
+        if set(rel.parts) & skip_dirs:
+            continue
+        if rel == Path("tests") / "test_templates.py":
+            continue                       # declares the patterns; see above
+        try:
+            yield rel, _scannable_text(path)
+        except (UnicodeDecodeError, ValueError):
+            continue                       # binary (.DS_Store and friends)
+
+
+AUTHOR_BLOCK_KEYS = ("author", "owner")
+
+
+def _scannable_text(path):
+    """A file's text with the deliberate author identity removed.
+
+    `plugin.json`'s `author` and `marketplace.json`'s `owner` carry a real name,
+    email and GitHub URL ON PURPOSE — a public plugin wants an identifiable
+    maintainer, and R16's disclosure channel needs somewhere to point. They are
+    the documented exception to the sweep, and the exception is scoped to those
+    two objects rather than to the whole file, so nothing personal can drift
+    into the rest of a manifest under cover of it.
+    """
+    text = path.read_text(encoding="utf-8")
+    if path.suffix != ".json" or path.parent.name != ".claude-plugin":
+        return text
+    data = json.loads(text)
+    for key in AUTHOR_BLOCK_KEYS:
+        data.pop(key, None)
+    return json.dumps(data, ensure_ascii=False, indent=2)
 
 
 @pytest.mark.parametrize("what,pattern", sorted(PERSONAL.items()))
@@ -226,6 +292,61 @@ def test_no_template_file_carries_personal_data(what, pattern):
             if pattern.search(line):
                 hits.append(f"{path.relative_to(PLUGIN_ROOT)}:{n}: {line.strip()}")
     assert not hits, f"{what} appears in a shipped template:\n" + "\n".join(hits)
+
+
+@pytest.mark.parametrize("what,pattern", sorted(PERSONAL.items()))
+def test_no_file_anywhere_in_the_repo_carries_personal_data(what, pattern):
+    """The templates were only ever the loudest place this could hide.
+
+    A public repo is read as a whole: a comment naming the author's other
+    project, a docstring quoting their home directory, a test fixture holding
+    their real chat id — each is the same disclosure as a template field, and
+    none of them is covered by a sweep scoped to `templates/`.
+    """
+    hits = []
+    for rel, text in repo_text_files():
+        for n, line in enumerate(text.splitlines(), 1):
+            if pattern.search(line):
+                hits.append(f"{rel}:{n}: {line.strip()}")
+    assert not hits, f"{what} appears at HEAD:\n" + "\n".join(hits)
+
+
+def test_the_repo_sweep_actually_reads_the_repo():
+    """Guards the guard. A walk that silently yields nothing — wrong root, a
+    skip rule that swallowed everything — passes the sweep above vacuously."""
+    seen = dict(repo_text_files())
+    assert len(seen) >= 25, f"the repo walk found too little: {sorted(seen)}"
+    for expected in (Path("README.md"),
+                     Path("libexec") / "turn_runner.py",
+                     Path(".claude-plugin") / "plugin.json"):
+        assert expected in seen, f"the repo walk missed {expected}"
+
+
+def test_the_author_block_is_the_only_exemption_and_it_is_scoped():
+    """The exemption must be a hole in two JSON objects, not in two files."""
+    for name, key in (("plugin.json", "author"),
+                      ("marketplace.json", "owner")):
+        path = PLUGIN_ROOT / ".claude-plugin" / name
+        raw = path.read_text(encoding="utf-8")
+        stripped = _scannable_text(path)
+        assert key in json.loads(raw), f"{name} lost its {key} block"
+        assert key not in json.loads(stripped)
+        # everything else in the manifest survives the strip and is swept
+        assert json.loads(raw)["name"] == json.loads(stripped)["name"]
+
+
+def test_no_file_names_an_external_service_the_author_holds_a_key_for():
+    """The env-scrubbing comment used to enumerate nine vendors whose live keys
+    a turn could read. Publishing that list tells a stranger nothing they can
+    act on about their OWN machine, and tells an attacker where to look on the
+    author's."""
+    hits = []
+    for rel, text in repo_text_files():
+        for n, line in enumerate(text.splitlines(), 1):
+            if CREDENTIALED_SERVICES.search(line):
+                hits.append(f"{rel}:{n}: {line.strip()}")
+    assert not hits, ("a named third-party service the author holds "
+                      "credentials for:\n" + "\n".join(hits))
 
 
 # --- the schedules point at prompts that exist -------------------------------
@@ -352,7 +473,7 @@ def _declared_prompt_language():
 CYRILLIC = re.compile(r"[Ѐ-ӿ]")
 
 
-@pytest.mark.parametrize("name", RUNNER_PROMPTS + SCHEDULE_PROMPTS)
+@pytest.mark.parametrize("name", RUNNER_PROMPTS + SCHEDULE_PROMPTS + NOTICES)
 def test_shipped_prompts_are_in_the_declared_language(name):
     """A prompt in the wrong language degrades the one turn whose whole job is
     restoring context, and that failure leaves no other trace. Shipping the
@@ -366,7 +487,7 @@ def test_shipped_prompts_are_in_the_declared_language(name):
 
 def test_the_russian_set_still_ships_as_an_example_override():
     ru = PROMPTS / "examples" / "ru"
-    assert {p.name for p in ru.glob("*.txt")} == set(RUNNER_PROMPTS)
+    assert {p.name for p in ru.glob("*.txt")} == set(RUNNER_PROMPTS) | set(NOTICES)
     for p in ru.glob("*.txt"):
         assert CYRILLIC.search(p.read_text(encoding="utf-8"))
 

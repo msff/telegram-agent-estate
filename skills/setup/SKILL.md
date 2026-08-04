@@ -41,7 +41,7 @@ Ask, and stop if the answer is no:
    Enumerate what this instance's brain is actually told to run:
    - every script command in its `CLAUDE.md`, written with the **literal**
      absolute interpreter path (a command containing `$VAR` is denied outright);
-   - every MCP tool it uses (`mcp__whoop__*`, `mcp__Intervals_icu__*`, …);
+   - every MCP tool it uses (`mcp__<server>__*`, one rule per server);
    - the files it writes (`Edit`/`Write` on its state dir — allow **both**
      verbs, since the model picks `Edit` for a file that already exists).
 

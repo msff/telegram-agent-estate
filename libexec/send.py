@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """The outbound send primitive: one Telegram message, journaled, owner-only.
 
-Extracted from `first-instance/scripts/send_transaction.py` alongside
-`guard.py`. What stayed behind in the reading repo is the R20 digest
-transaction — chunking, Readwise tag swaps, `»читать` Reader links — because
-none of that is what a second instance means by "send a message".
+Extracted, alongside `guard.py`, from the combined send/schedule module the
+first instance grew. What stayed behind in that instance's own repo is its
+digest transaction — chunking, API-side tag swaps, per-item deep links —
+because none of that is what a second instance means by "send a message".
 
 TWO INVARIANTS, both of which have teeth:
 
@@ -47,8 +47,8 @@ class SendError(Exception):
 
 
 def default_chat_id(cfg=None):
-    """The owner chat. No hardcoded fallback, deliberately: the reading version
-    fell back to a literal chat id, which under the plugin would mean a
+    """The owner chat. No hardcoded fallback, deliberately: the single-instance
+    version fell back to a literal chat id, which under the plugin would mean a
     misconfigured instance silently sending into the OTHER bot's chat."""
     return (cfg or instance_config.load()).owner_chat_id
 
@@ -61,8 +61,9 @@ def allowed_chat_ids(cfg=None):
 def render_html(text, link_label=None):
     """Escape for Telegram HTML and turn bare URLs into anchors.
 
-    `link_label` renders every link with one label instead of its URL; the
-    reading instance uses it for `»читать`. Left None, links show their URL.
+    `link_label` renders every link with one label instead of its URL — useful
+    for a digest whose every item is a link and whose URLs are noise. Left
+    None, links show their URL.
     """
     out, last = [], 0
     for m in _URL_RE.finditer(text):
@@ -110,8 +111,9 @@ def reply(text, chat_id=None, cfg=None, sender=None):
     there is nothing to resume. The raw index record still goes in, so a later
     quote-reply to THIS message resolves back through msg_index.
 
-    Deliberately NOT the R20 transaction path — scheduled digests must still go
-    through persist → send → mark, which handles chunking and resume.
+    Deliberately NOT a digest-transaction path — an instance that sends
+    multi-part digests still needs its own persist → send → mark, which handles
+    chunking and resume.
     """
     c = cfg or instance_config.load()
     if chat_id is None:

@@ -1,8 +1,8 @@
 # `libexec/` — the shared executable stack
 
-Transplanted from `first-instance/daemon/` at U13 (2026-08-02) and
-parameterized by the instance config. **Nothing here may hardcode an
-instance-specific string.**
+Transplanted from the first instance's own `daemon/` directory and parameterized
+by the instance config. **Nothing here may hardcode an instance-specific
+string.**
 
 **Why `libexec/` and not `bin/`** (KTD5): Claude Code adds an enabled plugin's
 `bin/` to the Bash tool's PATH for every session, so shipping these twelve files
@@ -15,7 +15,7 @@ reached either through that dispatcher or, for launchd, by absolute path.
 |---|---|---|
 | `instance_config.py` | *new* | the seam; everything else reads paths through it |
 | `estate-bootstrap.zsh` | *new* | sourced, not run: sed-reads `python:` so no entry point needs an ambient interpreter |
-| `estate_client.py` | `scripts/reader_client.py` (generic half) | logging, state roots, JSONL journals, conflict guard |
+| `estate_client.py` | `scripts/<api>_client.py` (generic half) | logging, state roots, JSONL journals, conflict guard |
 | `msg_index.py` | `scripts/msg_index.py` | message→document index + send journal |
 | `turn_runner.py` | `daemon/turn_runner.py` | receipt WAL, coalescing, retry, rotation, handoff prune |
 | `poller.py` | `daemon/telegram_poll.py` | owned long-poll receiver |
@@ -27,9 +27,9 @@ reached either through that dispatcher or, for launchd, by absolute path.
 | `install-instance.sh` | *new* | renders plists, copies (never symlinks) |
 | `parity.sh` | *new* | wraps `tests/test_gateway_parity.py` per instance |
 
-What did NOT come over, and should not: the Readwise API client, the digest
-transaction (chunked resume, tag swaps, Reader links), and anything else that is
-a *reading* concern rather than a *gateway* one.
+What did NOT come over, and should not: that instance's third-party API client,
+its digest transaction (chunked resume, tag swaps, per-item deep links), and
+anything else that is a concern of the *agent* rather than of the *gateway*.
 
 ## The rule this directory exists to enforce
 
@@ -48,7 +48,7 @@ So:
   directory, not the caller's workdir.
 - **Never cache the config in a module global.** An import-time constant cannot
   follow an environment override — that is exactly how a plain `pytest tests/`
-  pruned the live handoff file on 2026-07-31.
+  once pruned a live handoff file.
 - **Never default to a shared location.** Prefer a hard error: an instance that
   cannot identify itself would otherwise inherit another's state dir and token.
 

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Scheduling safety: markers, leases, payload persistence, and the pre-run guard.
 
-Extracted from `first-instance/scripts/send_transaction.py`, which mixed
-three separable things: this scheduling-safety layer (generic), the outbound
-send primitive (generic — now `send.py`), and the Readwise digest transaction
-with its tag swaps and Reader links (instance-specific, stays put).
+Extracted from the combined send/schedule module the first instance grew, which
+mixed three separable things: this scheduling-safety layer (generic), the
+outbound send primitive (generic — now `send.py`), and that instance's own
+digest transaction, with its API-side tag swaps and deep links
+(instance-specific, stays put).
 
 The three state roots — markers, leases, payloads — come from the instance
 config. Under separate checkouts they were distinct because `state_dir()`

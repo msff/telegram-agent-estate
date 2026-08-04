@@ -1,11 +1,13 @@
 # Parity suite as per-instance self-test
 
 `test_gateway_parity.py` is the phase gate that let the first instance cut over,
-and it is what a freshly-installed instance runs to prove itself.
+and it is what a freshly-installed instance runs to prove itself. It is
+parameterized by instance config, so any instance can run it against its own
+workdir, allowlist and MCP set:
 
-It is a straight copy from `first-instance/tests/` today and still imports
-that instance's modules. U13 parameterizes it by instance config (`libexec/parity.sh
-<instance.yaml> [--real]`) so any instance can run it.
+```sh
+libexec/parity.sh <instance.yaml> [--real]
+```
 
 Two modes, and the difference matters:
 

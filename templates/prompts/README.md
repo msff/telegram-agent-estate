@@ -18,6 +18,20 @@ instance via `prompts.*` in the instance config; unset uses the file here.
 | `silent-directive.txt` | `prompts.silent_directive` | prefix on a scheduled job marked `silent: true` | send anything to Telegram |
 | `reply-directive.txt` | `prompts.reply_directive` | prefix on every other scheduled job | — |
 
+## The one owner-facing notice
+
+`quota-notice.txt` (`prompts.quota_notice`) is not a prompt. It is the message
+the runner sends **you** when the usage window is nearly spent and it holds your
+message rather than spill into paid credits. It ships here because it has the
+same problem the prompts have — it is text a human reads, and no model composes
+it, so nothing downstream can translate it after the fact. Hardcoded, it would
+be the one place the installer's language stopped mattering.
+
+It takes no placeholders. If the file named by `prompts.quota_notice` cannot be
+read the runner falls back to this directory's copy, and then to a built-in
+English line: unlike a prompt, whose absence should fail the turn loudly, this
+string only explains a silence that is already happening.
+
 `{handoff}` (prime, flush) is substituted with the instance's handoff file,
 relative to its workdir; `{chat_id}` (reply directive) with the owner chat.
 **Keep the placeholders.** A prompt naming a path literally will, on an instance
@@ -49,8 +63,9 @@ status 2, on the schedule, forever, and only the job's log says so.
 ## Language
 
 The shipped set is English because a public plugin cannot assume its installer's
-language. `examples/ru/` holds a Russian translation of the four runner prompts,
-kept as a worked example of an override rather than as a fallback.
+language. `examples/ru/` holds a Russian translation of the four runner prompts
+and the quota notice, kept as a worked example of an override rather than as a
+fallback.
 
 If your agent thinks in another language, translate the four and point
 `prompts.*` at your files. This is **not optional polish**: a prompt in the

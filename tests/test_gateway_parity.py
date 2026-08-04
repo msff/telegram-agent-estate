@@ -473,8 +473,8 @@ def test_9_a_claude_md_edit_is_visible_to_the_very_next_turn(gw):
 # --- 10. instance isolation --------------------------------------------------
 
 def test_10_the_gateway_never_reaches_across_instances(gw, tmp_path):
-    """Two stacks live on this mac (reading + second-instance). Nothing here may see or
-    sweep the other instance's state.
+    """A mac can carry several instances of this plugin at once. Nothing here
+    may see or sweep another instance's state.
 
     The three couplings that could cross: the state root (env-scoped), the
     process probe (the poller's cmdline is unique to this repo), and the outbound
@@ -510,7 +510,7 @@ def test_10_the_gateway_never_reaches_across_instances(gw, tmp_path):
         mp.undo()
     # and the sanitizer really does drop everything else
     monkey = pytest.MonkeyPatch()
-    monkey.setenv("TELEGRAM_BOT_TOKEN", "second-instance-token-must-not-leak")
+    monkey.setenv("TELEGRAM_BOT_TOKEN", "other-instance-token-must-not-leak")
     monkey.setenv("ESTATE_ENV_PASSTHROUGH", "TELEGRAM_STATE_DIR")
     monkey.setenv("TELEGRAM_STATE_DIR", "/blank/dir")
     try:
