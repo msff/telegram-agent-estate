@@ -4,7 +4,7 @@
   "description": "Run a personal Claude agent as a Telegram-driven daemon: an owned long-poll receiver journals every inbound message to a durable receipt WAL, and a flock-serialized runner answers it with one `claude -p --resume` per turn. Crash-safe, exactly-once, subscription-billed. One plugin, many instances. macOS + launchd only.",
   "author": {
     "name": "ms",
-    "email": "you@example.com",
+    "email": "29483536+msff@users.noreply.github.com",
     "url": "https://github.com/msff"
   },
   "homepage": "https://github.com/msff/telegram-agent-estate",

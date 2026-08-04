@@ -394,3 +394,31 @@ def test_the_readme_states_the_release_convention():
         "the README does not say that a pin is a SHA rather than a tag name, "
         "which is the whole point: a tag is mutable and this is code launchd "
         "executes unattended")
+
+
+# --- the contact address must not become a dead drop --------------------------
+
+def test_a_noreply_author_address_is_never_offered_as_a_reporting_channel():
+    """The manifests carry a GitHub users.noreply address: attributable, and it
+    receives nothing. That is fine until a policy tells someone to write to it,
+    at which point a vulnerability report is discarded in silence — the worst
+    outcome available to this file. If the address ever becomes a real inbox
+    again, this test goes red and the policy can offer it deliberately."""
+    manifests = [json.loads((PLUGIN_ROOT / ".claude-plugin" / n).read_text())
+                 for n in ("plugin.json", "marketplace.json")]
+    emails = {(m.get("author") or m.get("owner") or {}).get("email") for m in manifests}
+    emails.discard(None)
+    assert emails, "no contact address in either manifest"
+
+    security = (PLUGIN_ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    if all(e.endswith("users.noreply.github.com") for e in emails):
+        lowered = security.lower()
+        assert "do not email" in lowered, (
+            "the manifest address does not receive mail; SECURITY.md must say so")
+        for verb in ("email the maintainer at", "write to the address",
+                     "send an email to"):
+            assert verb not in lowered, (
+                f"SECURITY.md directs reporters to {verb!r}, but the manifest "
+                f"address is a noreply that discards mail silently")
+    # Whatever the address, a private channel has to exist.
+    assert "security/advisories/new" in security

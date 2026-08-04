@@ -3,7 +3,7 @@
   "description": "One plugin: run a personal Claude agent as a Telegram-driven daemon on macOS. An owned long-poll receiver journals every inbound message to a durable receipt WAL; a flock-serialized runner answers it with one `claude -p --resume` per turn. Crash-safe, exactly-once, subscription-billed.",
   "owner": {
     "name": "ms",
-    "email": "you@example.com",
+    "email": "29483536+msff@users.noreply.github.com",
     "url": "https://github.com/msff"
   },
   "plugins": [

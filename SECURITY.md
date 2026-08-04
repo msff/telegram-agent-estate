@@ -15,10 +15,17 @@ That is GitHub's private vulnerability reporting form. It opens a thread only
 you and the maintainer can see, and it is the channel to use for anything you
 would not post in a public issue.
 
-**Alternative:** email the maintainer at the address in the `author` block of
-[`.claude-plugin/plugin.json`](.claude-plugin/plugin.json). That block is the
-one place in this repo that carries a real identity, deliberately, so this
-policy has somewhere to point. Put `SECURITY` in the subject.
+**Do not email the address in the manifests.** The `author` block of
+[`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) carries a GitHub
+`users.noreply.github.com` address. It exists so the manifest has a real,
+attributable identity — it does **not** receive mail, and anything sent there
+is discarded silently, which is the worst possible fate for a vulnerability
+report. The advisory form above is the private channel.
+
+**If the advisory form is unavailable to you** (no GitHub account, or the form
+is down), open a public issue saying only that you have a security report and
+would like a contact address. Say nothing else — no reproduction, no affected
+version, no hint at the mechanism.
 
 Please **do not** open a public issue for a vulnerability, and do not include a
 live bot token, an owner chat id, or any other credential in a report — a
@@ -30,7 +37,8 @@ redacted reproduction is more useful than a working one.
 else here. There is no bounty, no SLA, and one maintainer.
 
 - Acknowledgement: within about a week. If a fortnight passes with nothing,
-  assume the message was lost and try the other channel.
+  assume it was missed rather than ignored, and nudge the advisory thread —
+  it is the only private channel, so there is nowhere else to retry.
 - A confirmed issue gets a fix on the `main` branch and a new tag. Tags are the
   unit of distribution (see the README's release section), so the fix reaches
   an installed user only when they run an explicit upgrade — say so in the
