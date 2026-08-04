@@ -93,10 +93,19 @@ def scratch_tree(tmp_path, targets):
 
     `targets` maps a libexec filename to the exit code its stub should return.
     Each stub writes its argv, one argument per line, to `<tmp>/argv-<name>`.
+
+    `estate-runtime.zsh` is copied in because the dispatcher sources it to
+    decide WHICH libexec to run (U7/KTD1) and refuses to run without it — a
+    tree missing it is an incomplete plugin, not a plugin that falls back. The
+    scratch tree is not cache-resident and no stamp is in play, so the rule
+    resolves to this tree, which is what these tests are about.
     """
     bin_dir, libexec = tmp_path / "bin", tmp_path / "libexec"
     bin_dir.mkdir()
     libexec.mkdir()
+    resolver = libexec / "estate-runtime.zsh"
+    resolver.write_text((LIBEXEC / "estate-runtime.zsh").read_text(encoding="utf-8"),
+                        encoding="utf-8")
     dest = bin_dir / DISPATCHER.name
     dest.write_text(DISPATCHER.read_text(encoding="utf-8"), encoding="utf-8")
     dest.chmod(0o755)
@@ -166,13 +175,18 @@ def test_dispatcher_rejects_an_unknown_subcommand():
     assert "usage: telegram-agent-estate" in out
 
 
-@pytest.mark.parametrize("cmd", ["provision", "upgrade", "uninstall"])
+@pytest.mark.parametrize("cmd", ["uninstall"])
 def test_pending_subcommands_say_they_are_pending_rather_than_unknown(cmd):
-    """KTD5 fixes the five-name surface, and three of the five land later.
+    """KTD5 fixes the five-name surface, and the last of the five lands later.
 
     Declared-but-pending is not the same answer as unknown: one says "wait",
     the other says "you typed it wrong". Getting the second for a name the
     README lists would send a user hunting for a typo that is not there.
+
+    `provision` and `upgrade` were on this list until U7 implemented them;
+    `tests/test_provision.py` owns them now. The parametrize survives with one
+    member on purpose — `uninstall` is still pending and the shape is what the
+    next verb gets added to.
     """
     res = run([DISPATCHER, cmd])
     assert res.returncode != 0

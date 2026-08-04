@@ -5,7 +5,7 @@ by the instance config. **Nothing here may hardcode an instance-specific
 string.**
 
 **Why `libexec/` and not `bin/`** (KTD5): Claude Code adds an enabled plugin's
-`bin/` to the Bash tool's PATH for every session, so shipping these twelve files
+`bin/` to the Bash tool's PATH for every session, so shipping these files
 under those names would put `send.py`, `guard.py`, `parity.sh` and
 `supervisor.sh` into every installing user's shell. `bin/` holds exactly one
 file — the `telegram-agent-estate` dispatcher — and everything real lives here,
@@ -15,6 +15,8 @@ reached either through that dispatcher or, for launchd, by absolute path.
 |---|---|---|
 | `instance_config.py` | *new* | the seam; everything else reads paths through it |
 | `estate-bootstrap.zsh` | *new* | sourced, not run: sed-reads `python:` so no entry point needs an ambient interpreter |
+| `estate-runtime.zsh` | *new* | sourced, not run: the one copy of "which `libexec/` is this?" — stamp, cache, or self |
+| `provision-runtime.sh` | *new* | clones the pinned checkout launchd executes; `upgrade` verifies HEAD before restarting |
 | `estate_client.py` | `scripts/<api>_client.py` (generic half) | logging, state roots, JSONL journals, conflict guard |
 | `msg_index.py` | `scripts/msg_index.py` | message→document index + send journal |
 | `turn_runner.py` | `daemon/turn_runner.py` | receipt WAL, coalescing, retry, rotation, handoff prune |

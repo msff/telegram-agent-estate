@@ -32,12 +32,31 @@ CONFIG="${CONFIG/#\~/$HOME}"
 CONFIG="${CONFIG:A}"
 [[ -r "$CONFIG" ]] || { echo "unreadable instance config: $CONFIG" >&2; exit 2; }
 
-# The directory this script sits in is what gets stamped into every plist as an
-# absolute path, so launchd holds a copy of it until the next install. It is
-# `libexec/` and not `bin/` since U4 (KTD5) — the plists deliberately do not
-# route through the `bin/` dispatcher, because a scheduled job must not depend
-# on PATH, and `exec`ing one more process buys nothing here.
-LIBEXEC="${0:A:h}"
+# WHICH DIRECTORY GETS STAMPED INTO EVERY PLIST.
+#
+# launchd holds an absolute path copied at install time and executes it,
+# unattended, until the next install — so this one derivation decides what the
+# daemons run for as long as they run. It is `libexec/` and not `bin/` since U4
+# (KTD5): the plists deliberately do not route through the `bin/` dispatcher,
+# because a scheduled job must not depend on PATH, and `exec`ing one more
+# process buys nothing here.
+#
+# It is also NOT unconditionally this script's own directory any more (U7/KTD1).
+# If this copy is the plugin CACHE's, its directory is replaced wholesale by the
+# next plugin update, and a plist pointing there would keep executing a version
+# nobody chose. The same rule the dispatcher applies decides it, from the same
+# single copy: an override wins, a cache-resident copy installs the provisioned
+# runtime or refuses, anything else installs itself.
+#
+# Everything downstream — the bootstrap, the config reads, the templates — is
+# then taken from the resolved tree, not from this one. Installing a runtime's
+# code against a different tree's templates is a skew that would only surface
+# on the first scheduled fire.
+SELF_LIBEXEC="${0:A:h}"
+source "$SELF_LIBEXEC/estate-runtime.zsh" \
+  || { echo "missing $SELF_LIBEXEC/estate-runtime.zsh" >&2; exit 2; }
+estate_resolve_libexec "${SELF_LIBEXEC:h}" || exit $?
+LIBEXEC="$ESTATE_LIBEXEC_DIR"
 PLUGIN_ROOT="${LIBEXEC:h}"
 # Overridable so the two-instance isolation drill can render real plists into a
 # scratch directory. Nothing else should set it: an instance installed outside

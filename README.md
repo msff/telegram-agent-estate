@@ -158,15 +158,39 @@ SECURITY.md         where to report a vulnerability, and what counts as one
 Enabling this plugin puts exactly one name on your PATH:
 
 ```sh
-telegram-agent-estate install <instance.yaml> [--dry-run] [--no-load]
-telegram-agent-estate parity  <instance.yaml> [--real]
+telegram-agent-estate provision [--source <url|path>] [--ref <tag>] [--status]
+telegram-agent-estate upgrade   [--source <url|path>] [--ref <tag>] [--no-restart]
+telegram-agent-estate install   <instance.yaml> [--dry-run] [--no-load]
+telegram-agent-estate parity    <instance.yaml> [--real]
 ```
 
-`provision`, `upgrade` and `uninstall` are declared and not yet implemented;
-each says so and exits 2. Everything else — the supervisor, the poller, the turn
-runner, the scheduled-job entry point — lives in `libexec/`, which launchd
-invokes by absolute path and which is deliberately not on anyone's PATH.
-Arguments and exit codes pass through the dispatcher unchanged.
+`uninstall` is declared and not yet implemented; it says so and exits 2.
+Everything else — the supervisor, the poller, the turn runner, the
+scheduled-job entry point — lives in `libexec/`, which launchd invokes by
+absolute path and which is deliberately not on anyone's PATH. Arguments and
+exit codes pass through the dispatcher unchanged.
+
+**`install` and `parity` run the provisioned runtime, not the copy you typed.**
+`provision` clones a pinned checkout into
+`~/.local/share/telegram-agent-estate/runtime/` and records the resolved commit
+SHA in `runtime.json` beside it; that checkout is what launchd executes and what
+the dispatcher resolves to. The rule, in full:
+
+| where the command lives | what runs |
+|---|---|
+| `$ESTATE_LIBEXEC` is set | that directory — the explicit override wins |
+| inside a plugin cache | the provisioned runtime, or a refusal telling you to provision |
+| a plain checkout | itself, with a note on stderr if a different pin is installed |
+
+A cache-resident copy is never run: `/plugin update` installs into a new cache
+directory and leaves the old one, so a command that ran the cache would verify
+a tree no daemon executes. `provision` and `upgrade` are the exception — they
+run from wherever you invoked them, because they are what creates the runtime.
+
+Provisioning is offline-tolerant: with no `git`, or with an unreachable source,
+it copies the tree instead and records `"mechanism": "copy"` in the stamp. **A
+copied runtime has no upgrade path** — `provision --status` keeps saying so
+until you re-provision with git.
 
 The usual entry point is not either of these, though: ask Claude to set up an
 instance and the `setup` skill drives the whole flow, including the disclosures
