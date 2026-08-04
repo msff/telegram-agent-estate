@@ -1354,3 +1354,43 @@ def test_stuck_check_sees_what_the_fold_hides(gw):
                      "ts": tr._now_iso()})
     assert tr.pending_entries() == []                        # the fold hides it
     assert [r["update_id"] for r in tr.unanswered_entries(max_age_s=0)] == [20]
+
+
+# --- a turn must be able to identify its own instance -------------------------
+
+def test_child_env_carries_the_instance_config_path(gw, monkeypatch):
+    """Without this a turn physically cannot reply.
+
+    Everything a turn is told to run — send.py above all — resolves through
+    instance_config.load(), which has no default by design. Measured
+    2026-08-03: the child env was HOME/PATH/USER/SHELL/LOGNAME/TMPDIR/TERM/
+    SSH_AUTH_SOCK and nothing else, so that load raised ConfigError."""
+    env = tr._child_env()
+    assert instance_config.CONFIG_ENV in env
+    assert os.path.isabs(env[instance_config.CONFIG_ENV])
+
+
+def test_child_env_config_path_resolves_to_this_instance(gw):
+    # Not merely present — it must name the instance the runner is running as,
+    # or a turn would answer as (and write the state of) a different bot.
+    env = tr._child_env()
+    loaded = instance_config.load(env[instance_config.CONFIG_ENV])
+    assert loaded.name == tr.cfg().name
+
+
+def test_child_env_prefers_an_explicit_config_over_the_environment(gw, tmp_path,
+                                                                   monkeypatch):
+    # A caller that passed a config (parity, a scratch drill) must hand the turn
+    # the instance it is itself using, not whatever the ambient variable names.
+    other = write_instance(tmp_path / "other", name="other-instance")
+    monkeypatch.setenv(instance_config.CONFIG_ENV, str(other))
+    explicit = instance_config.load(tr.cfg().source)
+    env = tr._child_env(config=explicit)
+    assert instance_config.load(env[instance_config.CONFIG_ENV]).name == explicit.name
+
+
+def test_child_env_still_withholds_the_api_key(gw, monkeypatch):
+    # The config path is a path, not a credential — adding it must not have
+    # loosened the one exclusion that keeps billing on the subscription (KTD1).
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-should-never-reach-a-turn")
+    assert "ANTHROPIC_API_KEY" not in tr._child_env()

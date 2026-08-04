@@ -422,7 +422,17 @@ def test_the_ops_section_send_command_matches_send_py():
     cmd = _ops_send_command()
     assert "send_transaction.py" not in OPS_SECTION.read_text(encoding="utf-8")
     assert (PLUGIN_ROOT / "bin" / "send.py").exists()
-    assert positional == ["text"] and flags == {"--chat-id"}
+    # Pin the shape that makes the documented command runnable — one positional
+    # `text`, and `--chat-id` still optional — rather than the exact flag set.
+    # send.py may legitimately grow flags the ops section has no reason to name
+    # (`--config` exists for humans and setup flows; a turn is handed the
+    # instance through the environment), and freezing the set here would fail on
+    # every one of them without telling anyone anything.
+    assert positional == ["text"]
+    assert "--chat-id" in flags
+    # Whatever the ops command DOES use has to be real, though.
+    used = {tok for tok in cmd.split() if tok.startswith("--")}
+    assert used <= flags, f"ops section uses flags send.py does not have: {used - flags}"
 
     tail = cmd.split("send.py", 1)[1].strip()
     assert tail.startswith('"'), (

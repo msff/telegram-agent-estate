@@ -135,9 +135,21 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("text", help="message body")
     parser.add_argument("--chat-id", type=int, default=None)
+    # An explicit escape hatch from the environment. The turn runner passes
+    # $ESTATE_INSTANCE_CONFIG, which covers the normal path — but this command
+    # is also the one a human runs by hand to test an instance, and the one a
+    # setup flow verifies before any daemon exists. Without a flag, "which
+    # instance am I?" is answerable only by exporting a variable first, which
+    # is exactly the implicit dependency this exists to remove.
+    parser.add_argument("--config", default=None, metavar="PATH",
+                        help=f"instance YAML (default: ${instance_config.CONFIG_ENV})")
     args = parser.parse_args(argv)
     try:
-        reply(args.text, args.chat_id)
+        cfg = instance_config.load(args.config) if args.config else None
+        reply(args.text, args.chat_id, cfg=cfg)
+    except instance_config.ConfigError as exc:
+        log(f"send: {exc}", err=True)
+        return 2
     except SendError as exc:
         log(f"send: {exc}", err=True)
         return 1

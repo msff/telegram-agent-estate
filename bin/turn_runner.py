@@ -776,6 +776,20 @@ ENV_BASE_KEYS = ("HOME", "PATH", "USER", "SHELL", "LOGNAME", "LANG", "LC_ALL",
                  "TMPDIR", "TERM", "TZ", "SSH_AUTH_SOCK", "XDG_CONFIG_HOME")
 
 
+def _instance_config_source(config=None):
+    """Absolute path of the config this process is running as, or None.
+
+    Prefers the loaded config's own `source` over the environment variable, so
+    a caller that passed an explicit config (the parity suite, a scratch drill)
+    hands the turn the same instance it is itself using rather than whatever
+    the ambient variable happens to name."""
+    src = getattr(config or cfg(), "source", None)
+    if src:
+        return Path(os.path.abspath(os.path.expanduser(str(src))))
+    src = os.environ.get(instance_config.CONFIG_ENV)
+    return Path(os.path.abspath(os.path.expanduser(src))) if src else None
+
+
 def _child_env(config=None):
     """The sanitized environment for a turn subprocess.
 
@@ -798,6 +812,27 @@ def _child_env(config=None):
     tid = os.environ.get("ESTATE_TURN_ID")
     if tid:
         env["ESTATE_TURN_ID"] = tid
+    # So must the instance's own identity. Everything the turn is told to run —
+    # send.py above all — resolves its instance through instance_config.load(),
+    # which has NO default by design: an instance that cannot identify itself
+    # would inherit another instance's state directory and token. Without this
+    # line that load raises ConfigError, and a turn physically cannot reply.
+    #
+    # Measured 2026-08-03: the child env was HOME, PATH, USER, SHELL, LOGNAME,
+    # TMPDIR, TERM, SSH_AUTH_SOCK and nothing else, and `load()` under exactly
+    # that environment fails. Live turns nevertheless sent, by a mechanism that
+    # is not in this repo, the dotfiles, the plists, the --settings file, or the
+    # shell snapshots — so the send path worked on this machine for a reason
+    # nobody chose and no other machine can be assumed to reproduce. Passing it
+    # explicitly is what makes the behaviour a property of the code.
+    #
+    # This is a path, not a secret, and it does not widen what the AGENT can
+    # read: `Read(~/.config/**)` stays denied by the allowlist, so the model
+    # cannot open the file. Only the estate's own helpers, which are ordinary
+    # subprocesses rather than the Read tool, resolve through it.
+    src = _instance_config_source(config)
+    if src:
+        env[instance_config.CONFIG_ENV] = str(src)
     # Never let an API key reach the turn: billing must stay on the keychain
     # OAuth subscription (KTD1).
     env.pop("ANTHROPIC_API_KEY", None)
