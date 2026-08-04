@@ -27,6 +27,7 @@ reached either through that dispatcher or, for launchd, by absolute path.
 | `housekeeping.sh` | `daemon/daemon.sh` (03:00 block) | rotation, log caps, inbox sweep |
 | `run-job.sh` | `daemon/inject.sh --job` | one scheduled job; guard exit codes preserved |
 | `install-instance.sh` | *new* | renders plists, copies (never symlinks) |
+| `inspect-project.py` | *new* | onboarding step 3: what a target project already declares — **stdlib only**, it runs before the venv exists, and it prints no credential value |
 | `parity.sh` | *new* | wraps `tests/test_gateway_parity.py` per instance |
 
 What did NOT come over, and should not: that instance's third-party API client,
