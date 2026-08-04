@@ -28,6 +28,7 @@ reached either through that dispatcher or, for launchd, by absolute path.
 | `run-job.sh` | `daemon/inject.sh --job` | one scheduled job; guard exit codes preserved |
 | `install-instance.sh` | *new* | renders plists, copies (never symlinks) |
 | `inspect-project.py` | *new* | onboarding step 3: what a target project already declares — **stdlib only**, it runs before the venv exists, and it prints no credential value |
+| `claude-md-block.py` | *new* | onboarding step 11 and uninstall: the marker-delimited ops block and agent brief in the target's `CLAUDE.md`, inserted, replaced and removed idempotently — **stdlib only**, and the only writer of a file the user already owned |
 | `parity.sh` | *new* | wraps `tests/test_gateway_parity.py` per instance |
 
 What did NOT come over, and should not: that instance's third-party API client,

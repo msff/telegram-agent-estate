@@ -145,7 +145,8 @@ templates/
   env.template      secrets file (token lives ONLY here)
   plists/           launchd templates for the supervisor and scheduled jobs
   prompts/          the runner's prompts + the owner-facing quota notice
-  CLAUDE-ops-section.md   paste into the instance's CLAUDE.md
+  CLAUDE-ops-section.md   how the runner reaches you -> the project's CLAUDE.md
+  CLAUDE-agent-brief.md   what the project is and what the bot is for, same file
 skills/setup/       install / migrate / troubleshoot skill
 tests/              the parity suite, doubling as per-instance self-test
 .github/workflows/  macOS CI: manifest validation, the suite, dependency drift
