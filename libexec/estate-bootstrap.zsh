@@ -39,16 +39,23 @@
 # testable for that agreement; five copies are testable only for the one you
 # remember to change.
 
-# estate_resolve_python <instance.yaml>
+# estate_config_raw <instance.yaml> <key>
 #
-# Sets the global VENV_PY. Returns 2 (with a message on stderr) when the config
-# names no interpreter, or names one that cannot be executed.
-estate_resolve_python() {
-  local cfg="$1" raw p
+# Sets the global ESTATE_RAW to one top-level scalar, unexpanded. Empty when the
+# key is absent. Returns 0 either way — "absent" is the caller's judgement to
+# make, and the two callers disagree: a missing `python:` is fatal, a missing
+# `launchd_prefix:` during teardown is not.
+#
+# This is the sed read, factored out so the uninstaller can reach `name:` and
+# `launchd_prefix:` on a machine whose venv is already gone (it is, after all,
+# being torn down) without becoming a second parser with a second set of
+# defaults to drift out of sync with.
+estate_config_raw() {
+  local cfg="$1" key="$2"
 
   # ONE value, ONE line, read with sed — deliberately not a YAML parse.
   #
-  # `^python:` anchors at column 0, which is the whole of "top-level key" in
+  # `^<key>:` anchors at column 0, which is the whole of "top-level key" in
   # YAML: a nested `python:` is indented and a commented one starts with `#`,
   # so neither can match. The substitutions that follow reproduce the small
   # part of YAML scalar semantics a path can use — an inline comment must be
@@ -56,7 +63,7 @@ estate_resolve_python() {
   # stripped, trailing blanks go. Cross-checked against PyYAML on each of those
   # shapes; see tests/test_bootstrap.py.
   #
-  # THE ONE CONSTRAINT THIS PLACES ON A CONFIG: `python:` must be written on a
+  # THE ONE CONSTRAINT THIS PLACES ON A CONFIG: the key must be written on a
   # single line. YAML lets a plain scalar continue on the next, more-indented
   # line, and PyYAML's emitter FOLDS one there by default for anything past 80
   # columns — so a config generated with `yaml.safe_dump(...)` and a long venv
@@ -64,23 +71,30 @@ estate_resolve_python() {
   # unfolded (`width=` on the dump, or a template). A folded value truncates at
   # the fold, which is not executable, so it fails with the message below rather
   # than quietly resolving to something else.
-  raw=$(sed -n '/^python:/{
-      s/^python://
-      s/[[:space:]][[:space:]]*#.*$//
+  ESTATE_RAW=$(sed -n "/^$key:/{
+      s/^$key://
+      s/[[:space:]][[:space:]]*#.*\$//
       s/^[[:space:]]*//
-      s/[[:space:]]*$//
-      s/^"\(.*\)"$/\1/
-      s/^'\''\(.*\)'\''$/\1/
+      s/[[:space:]]*\$//
+      s/^\"\\(.*\\)\"\$/\\1/
+      s/^'\\(.*\\)'\$/\\1/
       p
       q
-  }' "$cfg" 2>/dev/null)
+  }" "$cfg" 2>/dev/null)
+  return 0
+}
 
-  if [[ -z "$raw" ]]; then
-    print -ru2 -- "instance config $cfg has no usable top-level 'python:' field"
-    print -ru2 -- "  Every entry point re-enters through that interpreter, so there is"
-    print -ru2 -- "  nothing to fall back to. Set it to the absolute path of this"
-    print -ru2 -- "  instance's venv python3."
-    return 2
+# estate_config_path <instance.yaml> <key>
+#
+# `estate_config_raw` plus the path expansion, into the global ESTATE_PATH.
+# Empty in, empty out.
+estate_config_path() {
+  local p
+
+  estate_config_raw "$1" "$2"
+  if [[ -z "$ESTATE_RAW" ]]; then
+    ESTATE_PATH=""
+    return 0
   fi
 
   # Reapply `~` and `$VAR` expansion so this lands on the same absolute path
@@ -97,13 +111,34 @@ estate_resolve_python() {
   # at the same "python not executable" message: an undefined `$VAR` expands to
   # empty here and stays literal in python, and `~user` (as opposed to `~/`) is
   # not supported.
-  p="$raw"
+  p="$ESTATE_RAW"
   case "$p" in
     '~')   p="$HOME" ;;
     '~/'*) p="$HOME/${p#\~/}" ;;
   esac
-  p=$(print -r -- "${(e)p}" 2>/dev/null) || p="$raw"
-  VENV_PY="${p:a}"
+  p=$(print -r -- "${(e)p}" 2>/dev/null) || p="$ESTATE_RAW"
+  ESTATE_PATH="${p:a}"
+  return 0
+}
+
+# estate_resolve_python <instance.yaml>
+#
+# Sets the global VENV_PY. Returns 2 (with a message on stderr) when the config
+# names no interpreter, or names one that cannot be executed.
+estate_resolve_python() {
+  local cfg="$1"
+
+  estate_config_path "$cfg" python
+
+  if [[ -z "$ESTATE_RAW" ]]; then
+    print -ru2 -- "instance config $cfg has no usable top-level 'python:' field"
+    print -ru2 -- "  Every entry point re-enters through that interpreter, so there is"
+    print -ru2 -- "  nothing to fall back to. Set it to the absolute path of this"
+    print -ru2 -- "  instance's venv python3."
+    return 2
+  fi
+
+  VENV_PY="$ESTATE_PATH"
 
   # `-f` as well as `-x`: a directory is executable, and a value that expanded
   # to nothing would otherwise resolve to the cwd and pass.

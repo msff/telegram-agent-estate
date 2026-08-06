@@ -163,13 +163,21 @@ telegram-agent-estate provision [--source <url|path>] [--ref <tag>] [--status]
 telegram-agent-estate upgrade   [--source <url|path>] [--ref <tag>] [--no-restart]
 telegram-agent-estate install   <instance.yaml> [--dry-run] [--no-load]
 telegram-agent-estate parity    <instance.yaml> [--real]
+telegram-agent-estate uninstall <instance.yaml> [--yes] [--purge-state] [--purge-secrets]
 ```
 
-`uninstall` is declared and not yet implemented; it says so and exits 2.
 Everything else — the supervisor, the poller, the turn runner, the
 scheduled-job entry point — lives in `libexec/`, which launchd invokes by
 absolute path and which is deliberately not on anyone's PATH. Arguments and
 exit codes pass through the dispatcher unchanged.
+
+**`uninstall` prints a plan and exits 3 unless you pass `--yes`.** It removes
+what this plugin installed — the launchd jobs, the running processes, the two
+marker blocks in your `CLAUDE.md` — and keeps what was yours: the workdir, the
+venv, the handoff file, and, unless you ask otherwise, the state dir and the
+token. It still works after the venv has been deleted, because deleting the venv
+is a normal first move when getting rid of something and the launchd jobs have
+to be removable afterwards.
 
 **`install` and `parity` run the provisioned runtime, not the copy you typed.**
 `provision` clones a pinned checkout into

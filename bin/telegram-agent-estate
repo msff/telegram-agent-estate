@@ -62,9 +62,10 @@ usage: telegram-agent-estate <subcommand> [args...]
         render this instance's launchd plists and load them
   parity <instance.yaml> [--real]
         run the parity suite against this instance
-
-Not yet available:
-  uninstall             (lands with the setup skill)
+  uninstall <instance.yaml> [--yes] [--dry-run] [--purge-state]
+            [--purge-secrets] [--keep-claude-md]
+        stop this instance and remove what was installed for it.
+        Prints a plan and exits 3 unless you pass --yes.
 
 `install` and `parity` run the PROVISIONED runtime — the same code the daemons
 execute — not necessarily the copy this command was resolved from. `provision`
@@ -82,6 +83,7 @@ typeset -A TARGETS=(
   parity    parity.sh
   provision provision-runtime.sh
   upgrade   provision-runtime.sh
+  uninstall uninstall-instance.sh
 )
 
 # The two verbs that share one entry point, which therefore has to be told which
@@ -100,12 +102,11 @@ typeset -A SELF_RESOLVED=(
   upgrade   1
 )
 
-# subcommand -> why it is not runnable yet. Declared rather than omitted so the
-# five-name surface is visible in `--help` from the start, and so asking for one
-# early gets an answer instead of "unknown subcommand", which reads as a typo.
-typeset -A PENDING=(
-  uninstall "uninstall-instance.sh lands with the setup skill"
-)
+# subcommand -> why it is not runnable yet. Empty since U8: `uninstall` was the
+# last of the five names to land. The map stays because the mechanism is what
+# made "declared but pending" a different answer from "unknown subcommand", and
+# the next verb added before it is implemented needs somewhere to say so.
+typeset -A PENDING=()
 
 cmd="${1:-}"
 case "$cmd" in

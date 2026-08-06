@@ -27,6 +27,7 @@ reached either through that dispatcher or, for launchd, by absolute path.
 | `housekeeping.sh` | `daemon/daemon.sh` (03:00 block) | rotation, log caps, inbox sweep |
 | `run-job.sh` | `daemon/inject.sh --job` | one scheduled job; guard exit codes preserved |
 | `install-instance.sh` | *new* | renders plists, copies (never symlinks) |
+| `uninstall-instance.sh` | *new* | the mirror image: unloads and removes the plists, stops this instance's processes, strips the `CLAUDE.md` blocks. Plans by default; purges state and secrets only on request; **works after the venv is gone**, because deleting it first is normal and the jobs still have to be removable |
 | `inspect-project.py` | *new* | onboarding step 3: what a target project already declares — **stdlib only**, it runs before the venv exists, and it prints no credential value |
 | `claude-md-block.py` | *new* | onboarding step 11 and uninstall: the marker-delimited ops block and agent brief in the target's `CLAUDE.md`, inserted, replaced and removed idempotently — **stdlib only**, and the only writer of a file the user already owned |
 | `parity.sh` | *new* | wraps `tests/test_gateway_parity.py` per instance |

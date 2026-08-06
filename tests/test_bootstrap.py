@@ -58,6 +58,23 @@ ENTRY_POINTS = {
     "parity.sh": lambda cfg: [cfg],
 }
 
+# `uninstall-instance.sh` (U8) is a sixth entry point, held to the PATH gate
+# with the others but NOT to the failure-message tests below, because it is the
+# one entry point for which a missing interpreter is not a fatal condition.
+#
+# The reasoning is specific to teardown: deleting the venv is a natural first
+# move when getting rid of something, and an uninstaller that then refuses to
+# run cannot unload the launchd jobs it installed — which leaves a timer firing
+# with no supported way to stop it. So it degrades to the sed reader, announces
+# that it has, and refuses only the operations that genuinely need the full
+# config. `tests/test_uninstall.py` owns that behaviour, including the one
+# ambient-`python3` fallback it is allowed to have.
+DEGRADING_ENTRY_POINTS = {
+    "uninstall-instance.sh": lambda cfg: [cfg, "--dry-run"],
+}
+
+ALL_ENTRY_POINTS = {**ENTRY_POINTS, **DEGRADING_ENTRY_POINTS}
+
 # The plan's literal gate: no Homebrew, no login dotfile, nothing but the two
 # directories a bare macOS ships. `real_sanitized_path` additionally shadows
 # `python3` with a stub that fails the way a Command Line Tools stub fails,
@@ -224,7 +241,7 @@ class Instance:
 def run_entry(inst, script, *, path=None, args=None, env_extra=None, timeout=60):
     """Run one entry point to completion. `supervisor.sh` gets special handling."""
     argv = [str(LIBEXEC / script)] + (args if args is not None
-                                  else ENTRY_POINTS[script](str(inst.config)))
+                                  else ALL_ENTRY_POINTS[script](str(inst.config)))
     env = inst.env(path=path, extra=env_extra)
     if script == "supervisor.sh":
         return _run_supervisor(inst, argv, env, timeout=timeout)
@@ -308,7 +325,7 @@ def evidence(inst, res):
 
 # --- the gate: every entry point works with nothing but /usr/bin and /bin -----
 
-@pytest.mark.parametrize("script", sorted(ENTRY_POINTS))
+@pytest.mark.parametrize("script", sorted(ALL_ENTRY_POINTS))
 def test_entry_point_loads_its_config_under_a_sanitized_path(tmp_path, script):
     """No Homebrew, no login dotfile, and `python3` on PATH refuses to run.
 
@@ -327,7 +344,7 @@ def test_entry_point_loads_its_config_under_a_sanitized_path(tmp_path, script):
     assert "alpha" in out, out
 
 
-@pytest.mark.parametrize("script", sorted(ENTRY_POINTS))
+@pytest.mark.parametrize("script", sorted(ALL_ENTRY_POINTS))
 def test_sanitized_path_reports_the_same_values_as_a_full_path(tmp_path, script):
     """Same config, two PATHs, same output.
 
@@ -500,12 +517,12 @@ def test_a_folded_python_scalar_fails_loudly(tmp_path):
     assert "Traceback" not in out, out
 
 
-@pytest.mark.parametrize("script", sorted(ENTRY_POINTS))
+@pytest.mark.parametrize("script", sorted(ALL_ENTRY_POINTS))
 def test_unreadable_config_keeps_its_existing_message(tmp_path, script):
     """This wording is how a misconfigured instance announces itself."""
     inst = Instance(tmp_path)
     missing = tmp_path / "not-there.yaml"
-    args = ENTRY_POINTS[script](str(missing))
+    args = ALL_ENTRY_POINTS[script](str(missing))
     res = run_entry(inst, script, args=args)
     out = combined(res)
     assert res.returncode != 0, out

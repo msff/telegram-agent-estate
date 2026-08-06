@@ -28,6 +28,7 @@ resolution path without running an installer or spending a turn.
 """
 import os
 import plistlib
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -175,24 +176,52 @@ def test_dispatcher_rejects_an_unknown_subcommand():
     assert "usage: telegram-agent-estate" in out
 
 
-@pytest.mark.parametrize("cmd", ["uninstall"])
-def test_pending_subcommands_say_they_are_pending_rather_than_unknown(cmd):
-    """KTD5 fixes the five-name surface, and the last of the five lands later.
+def test_every_declared_subcommand_routes_somewhere(tmp_path):
+    """KTD5 fixed the surface at five names; U8 landed the last of them.
 
-    Declared-but-pending is not the same answer as unknown: one says "wait",
-    the other says "you typed it wrong". Getting the second for a name the
-    README lists would send a user hunting for a typo that is not there.
-
-    `provision` and `upgrade` were on this list until U7 implemented them;
-    `tests/test_provision.py` owns them now. The parametrize survives with one
-    member on purpose — `uninstall` is still pending and the shape is what the
-    next verb gets added to.
+    `uninstall` was the one that said "not available yet" from U4 until now, so
+    what this asserts is the completion: every name the usage text prints has an
+    implementation behind it, and none of them answers with a placeholder.
     """
-    res = run([DISPATCHER, cmd])
-    assert res.returncode != 0
-    out = combined(res)
-    assert "not available yet" in out
-    assert "unknown subcommand" not in out
+    # Scraped from the printed usage, not from the source: what a user types is
+    # what they were shown, and a name that only exists in a shell array is not
+    # a name anyone can find.
+    helptext = run([DISPATCHER, "--help"]).stdout
+    names = set(re.findall(r"^  ([a-z-]+) ", helptext, re.M))
+    assert names == {"provision", "upgrade", "install", "parity", "uninstall"}, names
+
+    targets = {"install-instance.sh": 0, "parity.sh": 0, "provision-runtime.sh": 0,
+               "uninstall-instance.sh": 0}
+    disp = scratch_tree(tmp_path, targets)
+    for cmd in sorted(names):
+        res = run([disp, cmd, "cfg.yaml"])
+        out = combined(res)
+        assert "not available yet" not in out, f"{cmd} is still a placeholder"
+        assert "unknown subcommand" not in out, f"{cmd} is printed but not routed"
+
+
+def test_the_pending_mechanism_survives_its_last_member():
+    """Declared-but-pending is a different answer from unknown: one says "wait",
+    the other says "you typed it wrong", and getting the second for a name the
+    README lists sends a user hunting for a typo that is not there.
+
+    The `PENDING` map is empty now that `uninstall` has landed, so nothing
+    exercises it end-to-end — which is exactly when a cleanup deletes it and the
+    next declared-early verb silently reads as a typo. Asserting the mechanism
+    is still wired keeps the shape available for that verb.
+    """
+    body = DISPATCHER.read_text(encoding="utf-8")
+    assert "typeset -A PENDING=" in body
+    assert "not available yet" in body
+
+
+def test_uninstall_routes_to_its_libexec_implementation(tmp_path):
+    """The verb that turns a live instance off. Routing it to the wrong place —
+    or nowhere — is how a user ends up unloading launchd jobs by hand."""
+    disp = scratch_tree(tmp_path, {})
+    res = run([disp, "uninstall", "cfg.yaml"])
+    assert res.returncode == 2
+    assert "libexec/uninstall-instance.sh" in combined(res)
 
 
 # --- 4. what launchd is handed -----------------------------------------------
