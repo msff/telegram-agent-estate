@@ -208,21 +208,66 @@ def test_every_key_the_code_reads_is_in_the_template():
 
 # --- nothing personal ships --------------------------------------------------
 #
-# THIS FILE IS THE ONE PLACE THE PERSONAL STRINGS ARE ALLOWED TO APPEAR, because
-# it is where they are declared in order to be forbidden everywhere else. The
-# repo-wide sweep below therefore skips itself, and that self-exclusion is the
-# one hole in the sweep — keep the literals here and nowhere else, so the hole
-# stays exactly one file wide.
+# These patterns used to name the original author's actual home directory, chat
+# id, email and sibling projects — which made this file, in a public repo, a
+# published copy of the exact data it exists to keep out. A guard that discloses
+# its own subject is not a guard.
+#
+# So they are SHAPES now, not values, and that turns out to be the better test:
+# it catches the next contributor's home directory too, which a list of one
+# person's strings never could. The placeholders the repo legitimately uses
+# (`/Users/example`, `you@example.com`, `com.example`, chat id `0` and the
+# reserved `100000000xx` fixture range) are the exclusions, and each one is
+# spelled out rather than implied.
+#
+# THIS FILE REMAINS THE ONE PLACE THESE PATTERNS APPEAR, and the repo-wide sweep
+# below still skips itself — a regex for "an email address" necessarily looks
+# like one. That self-exclusion is the single hole in the sweep; keep it one
+# file wide.
 
 
 PERSONAL = {
-    "the owner chat id": re.compile(r"\b10000000001\b"),
-    "the author's home dir": re.compile(r"/Users/example\b"),
-    "the author's reverse domain": re.compile(r"\bco\.example\b|\bexample\b"),
-    "the author's email": re.compile(r"you@"),
-    "another project's name": re.compile(r"first-instance|second-instance|notes-vault",
-                                         re.IGNORECASE),
-    "a synced-folder path": re.compile(r"~/Dropbox|/vault\b"),
+    # A real home directory, i.e. any `/Users/<someone>` that is not the
+    # documentation placeholder. The first character may not be a dot, or the
+    # `/Users/...` written in prose to mean "an expanded path" matches.
+    "a real home directory": re.compile(
+        r"/Users/(?!example\b)[A-Za-z0-9_-][A-Za-z0-9._-]*"),
+
+    # A real email address. `example.com` and the reserved `.invalid`/`.test`
+    # TLDs are how this project writes an address it means nobody to use, and
+    # GitHub's noreply is a published identity rather than a contact.
+    "a real email address": re.compile(
+        r"[A-Za-z0-9._%+-]+@(?!users\.noreply\.github\.com\b)"
+        r"(?!example\.(?:com|org|net)\b)"
+        r"[A-Za-z0-9.-]+\.(?!invalid\b|test\b|example\b)[A-Za-z]{2,}"),
+
+    # A real Telegram chat id — ANCHORED TO ITS CONTEXT, not to its shape.
+    #
+    # Shape alone cannot do this and a first attempt proved it: chat ids, update
+    # ids and the legacy `999000000+seq` scheduler ids are all 9-to-12-digit
+    # numbers, so a bare `\d{9,12}` flagged a dozen legitimate test fixtures and
+    # would have trained the next person to widen the allowlist until the rule
+    # meant nothing. What identifies a chat id is the name next to it.
+    #
+    # `0` matches nobody by design; `100000000xx` is the fixture range the suite
+    # uses precisely so that no real id is ever a plausible-looking fixture. The
+    # eight-digit floor lets short obviously-fake ids like `999999` (the suite's
+    # "some chat that is not the owner") through, and costs nothing: a real
+    # Telegram account id has not been that short for many years.
+    "a real chat id": re.compile(
+        r"(?i)(?:owner[_ ]?chat[_ ]?id|chat[_ ]?id|\bOWNER\b|\bCHAT\b)"
+        r"\s*[=:]\s*['\"]?(?!0\b)(?!10000000\d{3}\b)\d{8,}"),
+
+    # A launchd prefix that belongs to someone. `com.example` is the reserved
+    # one the template ships with.
+    "a real reverse domain": re.compile(
+        r"\b(?:co|com|io|net|org|dev)\.(?!example\b)[a-z0-9-]{2,}\.[a-z0-9-]+"),
+
+    # A path into somebody's synced storage. The prose discusses Dropbox and
+    # iCloud as hazards, which is fine — it is the `~/`-rooted PATH form that
+    # says whose machine this was written on.
+    "a synced-folder path": re.compile(
+        r"~/(?:Dropbox|Google Drive|Library/Mobile Documents)"),
 }
 
 # Every external service the author's env-scrubbing probe found a live key for.

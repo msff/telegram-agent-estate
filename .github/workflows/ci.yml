@@ -103,6 +103,44 @@ jobs:
         run: claude plugin validate . --strict
 
   # --------------------------------------------------------------------------
+  # SECRETS AND PERSONAL DATA, over the whole history rather than the tip.
+  #
+  # This repo was extracted from one person's machine and its history was
+  # rewritten once, before publication, to remove that person's home directory,
+  # chat id, email and sibling project names. This job is what keeps that true:
+  # a rewrite is a one-time event, and the thing that reintroduces a home path
+  # is an ordinary commit six months later.
+  #
+  # `fetch-depth: 0` is load-bearing — the default shallow checkout has one
+  # commit in it, and a history scan of one commit is a tip scan wearing a
+  # costume.
+  #
+  # A finding here is not automatically an incident. Read the rule: a credential
+  # means REVOKE FIRST and rewrite second (every clone taken before the rewrite
+  # still has it); personal data means decide whether it should be a placeholder
+  # or an allowlist entry, and say which in the commit that fixes it.
+  secrets:
+    name: gitleaks (full history)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: brew install gitleaks
+
+      - name: Scan every commit
+        run: |
+          set -euo pipefail
+          gitleaks detect \
+            --source . \
+            --config .github/secret-patterns.toml \
+            --log-opts="--all" \
+            --redact \
+            --verbose
+
+  # --------------------------------------------------------------------------
   # The suite, against the declared dependency set. 3.11 is the declared floor
   # and is tested because the README makes a promise about it; the second leg
   # catches what a current interpreter deprecates out from under us.
