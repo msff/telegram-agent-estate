@@ -287,7 +287,23 @@ async def trigger_drain(state=None, runner=None, python=None) -> None:
 
     At most one trigger is in flight; extra ones would only bounce off the
     drain's flock. A trigger that loses that race is safe now that the drain
-    re-folds before releasing the lock (turn_runner.wal_size)."""
+    re-folds before releasing the lock (turn_runner.wal_size).
+
+    ITS OUTPUT GOES TO `drain.log`, and that is not housekeeping. Until U11 this
+    ran with `stdout=DEVNULL` and surfaced stderr only on a non-zero exit — so
+    every drain the POLLER triggered, which is every conversational turn there
+    is, logged nothing anywhere. The supervisor's periodic drain has its output
+    redirected by the shell and was the only one ever visible, which is why the
+    gap read as "quiet" rather than "unlogged".
+
+    What that hid, concretely (reading instance, 2026-08-04): a turn hit its
+    900s timeout and was retried and parked, and `drain.log` has no line at that
+    minute at all. The runner had logged it; there was no file underneath. A
+    failure whose only evidence is `ps` is a failure nobody finds twice.
+
+    Appending, reopened per drain: the file is truncated in place by the daily
+    log cap, so a handle held across the process's life would keep writing past
+    the end of a truncated file."""
     state = state if state is not None else _DRAIN_STATE
     task = state.get("task")
     if task is not None and not task.done():
@@ -297,14 +313,26 @@ async def trigger_drain(state=None, runner=None, python=None) -> None:
 
     async def _run():
         try:
-            proc = await asyncio.create_subprocess_exec(
-                python, runner, "drain",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE)
-            _, err = await proc.communicate()
+            try:
+                sink = open(cfg().log_path("drain.log"), "a", buffering=1)
+            except OSError as exc:
+                # A drain that cannot log is still a drain worth running.
+                log(f"drain log unavailable ({exc}) — running unlogged", err=True)
+                sink = None
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    python, runner, "drain",
+                    stdout=sink or asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.STDOUT if sink
+                    else asyncio.subprocess.PIPE)
+                _, err = await proc.communicate()
+            finally:
+                if sink is not None:
+                    sink.close()
             if proc.returncode != 0:
                 log(f"drain exited {proc.returncode}: "
-                      f"{(err or b'').decode()[:300]}", err=True)
+                    f"{(err or b'').decode()[:300] if err else 'see drain.log'}",
+                    err=True)
         except Exception as exc:  # noqa: BLE001
             log(f"drain trigger failed: {exc}", err=True)
 

@@ -53,6 +53,7 @@ import fcntl
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -873,6 +874,52 @@ def _child_env(config=None):
     return env
 
 
+# Seconds to wait between SIGTERM and SIGKILL when reaping a timed-out turn's
+# process group, and again while draining its pipes. Short on purpose: the turn
+# is already over by wall-clock, and the drain lock is held until this returns.
+KILL_GRACE = 5
+
+
+def _kill_process_group(proc):
+    """SIGTERM then SIGKILL the child's whole process group.
+
+    Every failure here is survivable and none of it may raise: the caller is
+    already handling a timeout, and an exception thrown while cleaning up after
+    one failure would replace a logged timeout with an unlogged crash.
+
+    `os.killpg` on the child's OWN pgid, never on 0 or on the runner's group —
+    `start_new_session=True` in the caller is what makes those different, and a
+    kill aimed at the runner's group would take the poller and the supervisor
+    down with the turn.
+    """
+    try:
+        pgid = os.getpgid(proc.pid)
+    except (ProcessLookupError, PermissionError, OSError):
+        proc.kill()
+        return
+    if pgid == os.getpgrp():  # start_new_session did not take — do not fratricide
+        log("turn_runner: timed-out turn shares the runner's process group; "
+            "killing the child alone", err=True)
+        proc.kill()
+        return
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            return  # the group is gone, which is the goal
+        except OSError as exc:
+            log(f"turn_runner: could not signal process group {pgid}: {exc}",
+                err=True)
+            return
+        if sig is signal.SIGTERM:
+            try:
+                proc.wait(timeout=KILL_GRACE)
+                # The leader is down. Anything left in the group is a tool that
+                # ignored SIGTERM, so fall through to SIGKILL regardless.
+            except subprocess.TimeoutExpired:
+                pass
+
+
 def _default_invoker(argv, timeout):
     """Run `claude -p ...` and return a CompletedProcess. Prompt is passed as
     argv (never stdin — the launchd env fix), cwd is the INSTANCE workdir so
@@ -883,10 +930,41 @@ def _default_invoker(argv, timeout):
     stdin is EXPLICITLY /dev/null. Without it the CLI waits ~3s for piped stdin
     that is never coming ("no stdin data received in 3s, proceeding without
     it") — pure latency on every single turn, and a hang risk if the inherited
-    stdin happens to be a pipe nobody closes."""
-    return subprocess.run(argv, cwd=str(workdir()), capture_output=True,
-                          text=True, timeout=timeout, env=_child_env(),
-                          stdin=subprocess.DEVNULL)
+    stdin happens to be a pipe nobody closes.
+
+    THE TIMEOUT KILLS THE PROCESS GROUP, NOT JUST THE CHILD. `subprocess.run`'s
+    own timeout kills the direct child and waits for it — but `claude` is a
+    supervisor of its own tools, and its grandchildren are not killed with it.
+    They reparent to PID 1 and keep running: unsupervised, holding network
+    connections, and writing to the same state the next turn is about to read.
+
+    Measured on the reading instance 2026-08-04: a turn was killed at its 900s
+    timeout, and the tool it had spawned went on making API calls for a further
+    19 minutes before completing a write nobody was waiting for any more. The
+    turn had already been journaled as failed, so a retry could have started
+    while that orphan was still mid-write.
+
+    `start_new_session=True` makes the child a session and process-group leader,
+    so the group is exactly this turn's tree and killing it cannot reach the
+    runner, the poller, or another instance. TERM first — the CLI flushes its
+    session state on it, and a SIGKILLed turn loses the transcript the next
+    `--resume` needs — then KILL for whatever is still there."""
+    proc = subprocess.Popen(argv, cwd=str(workdir()), env=_child_env(),
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True,
+                            start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(proc)
+        # Reap, so the entry the caller sees is a finished process rather than a
+        # zombie, and drain the pipes the group may have left full.
+        try:
+            out, err = proc.communicate(timeout=KILL_GRACE)
+        except subprocess.TimeoutExpired:
+            out, err = "", ""
+        raise subprocess.TimeoutExpired(argv, timeout, output=out, stderr=err)
+    return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
 
 def _backend_a(prompt, head, invoker, timeout, turn_id=None):
