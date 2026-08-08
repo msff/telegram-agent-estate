@@ -60,6 +60,61 @@ what the session map and the nightly handoff rotation are for.
   credential; `ANTHROPIC_API_KEY` is stripped from every turn's environment
   unconditionally.
 
+## Scheduled work
+
+Jobs are declared in the instance config and rendered into one launchd plist
+each:
+
+```yaml
+schedules:
+  - job: morning-brief
+    hour: 9
+    minute: 0
+    not_before: "06:00"
+    prompt_file: prompts/morning.txt
+
+  - job: weekly-reflection
+    weekday: 0            # 0 = Sunday
+    hour: 11
+    minute: 0
+    silent: true          # compute, but do not push to Telegram
+```
+
+**These are scheduled TURNS, not scheduled sends,** and the difference is the
+whole design. Nothing is queued in advance. At the appointed time the agent runs
+a full turn with that prompt — pulls whatever it needs, thinks, and sends what it
+concludes — so the content is composed at fire time against fresh data. There is
+no "deliver this exact text at 15:00" primitive; you get that, if you want it, by
+writing a job whose prompt is the text.
+
+What that buys over a cron line calling the same command:
+
+- **Idempotent by marker.** The guard answers with distinct exit codes — `0` run,
+  `3` already done today, `4` a send is in flight, `5` too early — and they are
+  forwarded untouched through every layer. Collapsing `3` into a generic failure
+  is how duplicate suppression becomes a duplicate send, so nothing collapses it.
+- **`not_before` is a lower bound, not a nicety.** A mac that wakes at 02:00 and
+  runs a missed 09:00 job would otherwise consume the new day's marker and
+  suppress the real run. The morning brief arrives once, in the morning.
+- **A scheduled turn is never coalesced with chat.** Chat messages that arrive
+  together fold into one turn; every scheduler entry gets its own. Its reply
+  directive therefore cannot leak onto a user message.
+- **Quota-aware.** At or above `quota_defer_at` (default 0.90) of the five-hour
+  usage window, scheduled turns defer rather than spend the tail of it. Deferred
+  work stays pending in the WAL and self-heals when the window recovers, so
+  automation never silently pushes your conversational turns into overflow.
+- **A failed job is not a lost job.** It retries, then parks to the dead-letter
+  file with an alert — the same path an unanswered message takes.
+
+**The launchd caveat, because it decides how you design a job.**
+`StartCalendarInterval` does not wake a sleeping mac and does not catch up runs
+it missed. A laptop closed at 09:00 does not get a 09:00 brief when it opens at
+11:00 — it gets nothing. That is survivable for a brief and fatal for
+maintenance, which is why the daily housekeeping window is *not* a scheduled job
+at all: the supervisor loop checks wall-clock time and a date stamp, so it fires
+on the first pass after the hour whenever the machine happens to be awake. If a
+job genuinely must happen every day, model it that way rather than on a timer.
+
 ## What the permission allowlist is — and what it is not
 
 Every turn runs with `--permission-mode dontAsk` against an explicit allowlist
