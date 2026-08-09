@@ -354,3 +354,41 @@ def test_a_drain_still_runs_when_its_log_cannot_be_opened(tmp_path, monkeypatch)
         """)
 
     assert marker.exists(), "an unwritable log stopped the drain from running"
+
+
+# --- 4. a failure that says nothing is a failure nobody can act on -------------
+
+def test_a_killed_turn_reports_the_signal_rather_than_an_empty_error(tmp_path):
+    """`turn failed ()` — observed on the reading instance 2026-08-09, twice in
+    a row, and repeated verbatim into the owner alert: "could not be processed
+    after 2 attempts ()". A killed `claude -p` prints nothing, so `stderr[:300]`
+    was empty and the record said nothing about why.
+    """
+    script = tmp_path / "suicide.py"
+    script.write_text("import os, signal\nos.kill(os.getpid(), signal.SIGTERM)\n",
+                      encoding="utf-8")
+
+    result = turn_runner._backend_a(
+        "prompt", None,
+        lambda argv, timeout: turn_runner._default_invoker(
+            [sys.executable, str(script)], 30),
+        30)
+
+    assert result.ok is False
+    assert result.error, "the failure carries no detail at all"
+    assert "SIGTERM" in result.error, result.error
+
+
+@pytest.mark.parametrize("rc,expect", [
+    (7, "exit 7"),
+    (-signal.SIGKILL, "SIGKILL"),
+    (None, "no exit status"),
+])
+def test_failure_detail_always_says_something(rc, expect):
+    assert expect in turn_runner._failure_detail(rc, "")
+
+
+def test_real_stderr_still_wins_over_the_exit_code():
+    """The fallback must not mask a CLI that did explain itself."""
+    detail = turn_runner._failure_detail(1, "  credit balance too low  ")
+    assert detail == "credit balance too low"

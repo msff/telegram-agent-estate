@@ -967,6 +967,33 @@ def _default_invoker(argv, timeout):
     return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
 
+def _failure_detail(returncode, stderr):
+    """Why a turn failed, in a form that survives an empty stderr.
+
+    A killed `claude -p` exits non-zero and prints NOTHING, so reporting
+    `stderr[:300]` alone produced `turn failed ()` in the log and — verbatim,
+    parens and all — in the owner alert: "a message could not be processed
+    after 2 attempts ()". Observed on the reading instance 2026-08-09, where
+    two consecutive attempts failed and the record said nothing about either.
+
+    An exit code is not a diagnosis, but it is the difference between "killed
+    by SIGTERM" and "the CLI refused", which are opposite investigations.
+    """
+    detail = (stderr or "").strip()[:300]
+    if detail:
+        return detail
+    if returncode is None:
+        return "no exit status"
+    # Popen reports a signalled child as -signum.
+    if returncode < 0:
+        try:
+            name = signal.Signals(-returncode).name
+        except ValueError:
+            name = "unknown"
+        return f"killed by signal {-returncode} ({name}), no stderr"
+    return f"exit {returncode}, no stderr"
+
+
 def _backend_a(prompt, head, invoker, timeout, turn_id=None):
     """Headless `claude -p --resume`. Returns TurnResult. Parses --output-format
     json for the session id (stable per chat, U5) and the reply text. Exposes
@@ -994,7 +1021,7 @@ def _backend_a(prompt, head, invoker, timeout, turn_id=None):
                 os.environ["ESTATE_TURN_ID"] = old
     if proc.returncode != 0:
         return TurnResult(False, None, None, proc.returncode,
-                          (proc.stderr or "")[:300])
+                          _failure_detail(proc.returncode, proc.stderr))
     try:
         data = json.loads(proc.stdout or "{}")
     except json.JSONDecodeError:
