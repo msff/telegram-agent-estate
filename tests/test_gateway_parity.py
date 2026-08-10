@@ -51,7 +51,14 @@ The send journal is the exception, and it is deliberate rather than forgotten:
 real mode the workdir IS the live instance's, because the turn has to think
 with the real CLAUDE.md. A `--real` drill therefore appends its `[PARITY]`
 outbounds to that instance's own msg-index — which is also why the assertions
-can read them back. Nothing else of the instance's state is written.
+can read them back.
+
+Job completion markers go to the same place, for the same reason, and that used
+to make real mode silently once-per-day: constant job names meant the second run
+of a day found the first run's marker and skipped the turn. Names now carry a
+per-run suffix (see `RUN`) and the `gw` fixture sweeps them on teardown. Those
+two — outbounds and markers — are the whole of what a drill writes into a live
+instance.
 """
 import json
 import os
@@ -183,7 +190,18 @@ def gw(tmp_path, monkeypatch, owner_chat_id, live_config):
     # wrong place.
     monkeypatch.setenv("ESTATE_GATEWAY_STATE_DIR", str(tmp_path))
     monkeypatch.setattr(tr, "HANDOFF_PATH", None)
-    return tmp_path
+    yield tmp_path
+    # Job markers land in the AGENT state dir, which in real mode is the live
+    # instance's own. Unique-per-run names keep a re-run correct; sweeping them
+    # afterwards keeps a real instance's marker dir free of test artifacts that
+    # would otherwise accumulate one or two per run, forever.
+    try:
+        import guard as guard_mod
+        for p in guard_mod.marker_path("sweep", "0000-00-00").parent.glob(
+                f"*{RUN}*"):
+            p.unlink()
+    except Exception:
+        pass
 
 
 def block(text, mid):
@@ -256,6 +274,24 @@ def nonce():
     return uuid.uuid4().hex[:8].upper()
 
 
+# A JOB NAME MUST BE UNIQUE PER RUN, and this is not tidiness.
+#
+# `guard.marker_path()` keys a completion marker on (job, day) under the AGENT
+# state dir — which in real mode is the live instance's own workdir, borrowed
+# deliberately, because proving the real paths is the whole point of the mode.
+# With a constant job name the first real run of a day wrote
+# `parity-job-<today>`, and `reconcile_pending()` — which settles a scheduler
+# entry on marker evidence, not send evidence — then found that marker on every
+# later run that day, concluded the job had already delivered, and skipped the
+# turn. The drill failed with `turns == 1` and pointed nowhere near the cause.
+#
+# Observed 2026-08-10: the 09:19 run passed both marker-backed drills, the
+# 14:02 run failed both. Real mode was quietly once-per-day.
+RUN = uuid.uuid4().hex[:8]
+JOB_ONCE = f"parity-job-{RUN}"
+JOB_SERIAL = f"parity-serial-{RUN}"
+
+
 # --- 1. ad-hoc echo parity ---------------------------------------------------
 
 def test_1_adhoc_message_gets_exactly_one_reply(gw):
@@ -288,14 +324,14 @@ def test_2_scheduled_job_fires_once_and_the_duplicate_no_ops(gw, monkeypatch):
     def lease(job):
         pass
 
-    rc1 = tr.enqueue_job("parity-job", "[SCHEDULED] parity drill", chat_id=owner(),
+    rc1 = tr.enqueue_job(JOB_ONCE, "[SCHEDULED] parity drill", chat_id=owner(),
                          guard_fn=guard, lease_writer=lease)
     assert rc1 == 0
     s = tr.drain(invoker=invoker(), alert=_silent, probe=_no_probe)
     assert s["turns"] == 1
     marker_written["v"] = True                    # the send primitive wrote it
 
-    rc2 = tr.enqueue_job("parity-job", "[SCHEDULED] parity drill", chat_id=owner(),
+    rc2 = tr.enqueue_job(JOB_ONCE, "[SCHEDULED] parity drill", chat_id=owner(),
                          guard_fn=guard, lease_writer=lease)
     assert rc2 == 3, "a duplicate fire must not enqueue a second turn"
     assert tr.pending_entries() == []
@@ -347,7 +383,7 @@ def test_5_a_job_never_coalesces_with_a_user_message(gw):
     """A scheduled brief and a chat message must stay separate turns — a job's
     outcome has to remain attributable to the job."""
     tr.journal_inbound(20, "message", owner(), block("[PARITY] чат", 20))
-    tr.enqueue_job("parity-serial", "[SCHEDULED] parity brief", chat_id=owner(),
+    tr.enqueue_job(JOB_SERIAL, "[SCHEDULED] parity brief", chat_id=owner(),
                    guard_fn=lambda *a, **k: 0, lease_writer=lambda j: None)
     tr.journal_inbound(21, "message", owner(), block("[PARITY] ещё чат", 21))
     groups = tr.group_into_turns(tr.pending_entries())
