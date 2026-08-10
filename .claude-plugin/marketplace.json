@@ -11,7 +11,7 @@
       "name": "telegram-agent-estate",
       "source": "./",
       "description": "Run a personal Claude agent as a Telegram-driven daemon: receipt WAL in, one `claude -p --resume` per turn out. Crash-safe, exactly-once, subscription-billed. macOS + launchd only.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "homepage": "https://github.com/msff/telegram-agent-estate",
       "license": "MIT",
       "keywords": [
