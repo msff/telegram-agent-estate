@@ -392,3 +392,36 @@ def test_real_stderr_still_wins_over_the_exit_code():
     """The fallback must not mask a CLI that did explain itself."""
     detail = turn_runner._failure_detail(1, "  credit balance too low  ")
     assert detail == "credit balance too low"
+
+
+def test_stdout_is_read_when_stderr_is_empty():
+    """We invoke with `--output-format json`, so the CLI reports ITS OWN errors
+    on stdout. Reading only stderr rendered those as `exit 1, no stderr` — a
+    message that sends the reader looking for a killed process when the CLI had
+    in fact explained itself. Observed on a real parity turn 2026-08-10."""
+    detail = turn_runner._failure_detail(
+        1, "", '{"type":"result","is_error":true,"result":"usage limit reached"}')
+    assert "usage limit reached" in detail
+    assert "no stderr" not in detail, (
+        "claiming nothing was said, while quoting what was said")
+
+
+def test_stderr_still_wins_when_both_streams_spoke():
+    """stderr is the more specific channel; stdout is the fallback, not a
+    replacement."""
+    detail = turn_runner._failure_detail(1, "killed by the supervisor", "{}")
+    assert detail == "killed by the supervisor"
+
+
+def test_a_silent_failure_is_still_reported_by_code():
+    """Both streams empty is the original `turn failed ()` case and must keep
+    naming the exit code rather than degrading to an empty string."""
+    assert "exit 1" in turn_runner._failure_detail(1, "", "")
+    assert "exit 1" in turn_runner._failure_detail(1, None, None)
+
+
+def test_the_detail_is_bounded():
+    """A megabyte of JSON on stdout must not become a megabyte of log line, or
+    an owner alert Telegram refuses to deliver."""
+    detail = turn_runner._failure_detail(1, "", "x" * 10_000)
+    assert len(detail) < 400

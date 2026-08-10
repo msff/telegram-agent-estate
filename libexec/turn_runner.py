@@ -967,7 +967,7 @@ def _default_invoker(argv, timeout):
     return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
 
-def _failure_detail(returncode, stderr):
+def _failure_detail(returncode, stderr, stdout=None):
     """Why a turn failed, in a form that survives an empty stderr.
 
     A killed `claude -p` exits non-zero and prints NOTHING, so reporting
@@ -978,10 +978,21 @@ def _failure_detail(returncode, stderr):
 
     An exit code is not a diagnosis, but it is the difference between "killed
     by SIGTERM" and "the CLI refused", which are opposite investigations.
+
+    STDOUT IS PART OF THE ANSWER. We invoke with `--output-format json`, and
+    the CLI reports its own errors THERE, not on stderr — so a failed turn
+    routinely has an empty stderr and a populated stdout. Reading only stderr
+    turned those into `exit 1, no stderr`, which reads like the CLI died
+    without explanation when in fact it had explained itself and we discarded
+    the explanation. That is the same defect as `turn failed ()`, one layer
+    down: a diagnosis was captured and thrown away.
     """
     detail = (stderr or "").strip()[:300]
     if detail:
         return detail
+    out = (stdout or "").strip()
+    if out:
+        return f"exit {returncode}, stdout: {out[:300]}"
     if returncode is None:
         return "no exit status"
     # Popen reports a signalled child as -signum.
@@ -1021,12 +1032,14 @@ def _backend_a(prompt, head, invoker, timeout, turn_id=None):
                 os.environ["ESTATE_TURN_ID"] = old
     if proc.returncode != 0:
         return TurnResult(False, None, None, proc.returncode,
-                          _failure_detail(proc.returncode, proc.stderr))
+                          _failure_detail(proc.returncode, proc.stderr,
+                                          proc.stdout))
     try:
         data = json.loads(proc.stdout or "{}")
     except json.JSONDecodeError:
+        snippet = (proc.stdout or "").strip()[:200] or "(empty)"
         return TurnResult(False, None, None, proc.returncode,
-                          "non-JSON output from claude -p")
+                          f"non-JSON output from claude -p: {snippet}")
     new_head = data.get("session_id") or head
     return TurnResult(True, data.get("result"), new_head, 0, None)
 
