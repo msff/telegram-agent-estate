@@ -67,7 +67,7 @@ def log(msg, err=False):
     # poller.log, so Python block-buffers it and lines sit unwritten for a long
     # time. A log that appears minutes late is worse than none — it was briefly
     # lost here and made the poller look dead when it was fine.
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}",
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {redact_secrets(msg)}",
           file=sys.stderr if err else sys.stdout, flush=True)
 
 LIBEXEC = Path(__file__).resolve().parent
@@ -77,6 +77,7 @@ sys.path.insert(0, str(LIBEXEC))
 
 import instance_config  # noqa: E402
 import turn_runner  # noqa: E402  (the receipt WAL — journal-on-receipt)
+from estate_client import redact_secrets  # noqa: E402  (used by log() above)
 
 
 def cfg():

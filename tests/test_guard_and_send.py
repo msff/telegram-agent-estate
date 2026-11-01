@@ -112,6 +112,50 @@ def test_missing_token_names_the_file_it_expected(cfg, monkeypatch):
         send.bot_api_sender(CHAT, "hi", cfg=cfg)
 
 
+# Token-shaped, and assembled at runtime: written out as one literal it would
+# trip this repo's own secret scan, which is exactly what it imitates.
+FAKE_TOKEN = "1" * 10 + ":" + "A" * 35
+
+
+def _unreachable(url, **kwargs):
+    """What `requests` raises when DNS is down: its text repeats the URL."""
+    raise send.requests.ConnectionError(
+        "HTTPSConnectionPool(host='api.telegram.org', port=443): Max retries "
+        f"exceeded with url: {url.split('api.telegram.org', 1)[1]}")
+
+
+def test_a_network_failure_never_carries_the_token(cfg, monkeypatch, capsys):
+    """The Bot API URL holds the token, and `requests` repeats that URL in its
+    connection errors. Passed on as is, a DNS outage put the token into every
+    log line and traceback that printed the error."""
+    cfg.token_file.write_text(f"TELEGRAM_BOT_TOKEN={FAKE_TOKEN}\n", encoding="utf-8")
+    monkeypatch.setattr(send.requests, "post", _unreachable)
+
+    with pytest.raises(send.SendError) as raised:
+        send.bot_api_sender(CHAT, "hello", cfg=cfg)
+    assert FAKE_TOKEN not in str(raised.value)
+    assert "/bot<redacted>/sendMessage" in str(raised.value)
+    assert raised.value.__suppress_context__   # no traceback prints the original
+
+    assert send.main(["hello"]) == 1           # the CLI used to die on a traceback
+    out = capsys.readouterr()
+    assert FAKE_TOKEN not in out.out + out.err
+    assert "send: sendMessage failed" in out.err
+
+
+def test_a_failed_owner_alert_logs_no_token(cfg, monkeypatch, capsys):
+    """The path that actually leaked: a turn fails, the runner alerts the owner,
+    the alert fails too, and the runner logs why."""
+    import turn_runner
+    cfg.token_file.write_text(f"TELEGRAM_BOT_TOKEN={FAKE_TOKEN}\n", encoding="utf-8")
+    monkeypatch.setattr(send.requests, "post", _unreachable)
+
+    turn_runner._default_alert("a turn failed")
+    out = capsys.readouterr().out
+    assert "owner alert failed" in out
+    assert FAKE_TOKEN not in out
+
+
 def test_reply_refuses_non_owner_chat(cfg, monkeypatch):
     """A prompt-injected session that talks itself into `reply --chat-id
     <foreign>` must not reach the network at all."""
