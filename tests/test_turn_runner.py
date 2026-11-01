@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -1272,6 +1273,75 @@ def test_a_conversational_turn_writes_no_marker(gw, tmp_path):
     markers = list((tr.cfg().agent_state_dir / "markers").glob("*")) \
         if (tr.cfg().agent_state_dir / "markers").exists() else []
     assert markers == []
+
+
+def _enqueue_stamped(job, stamp, monkeypatch):
+    """Enqueue `job` as if its fire had journaled at `stamp` (a `_now_iso` UTC
+    string), then put the real clock back so the drain finishes "now"."""
+    real_now_iso = tr._now_iso
+    monkeypatch.setattr(tr, "_now_iso", lambda: stamp)
+    tr.enqueue_job(job, "brief", chat_id=OWNER,
+                   guard_fn=FakeGuard(0), lease_writer=lambda j: None)
+    monkeypatch.setattr(tr, "_now_iso", real_now_iso)
+
+
+@pytest.fixture
+def east_of_utc():
+    """Run in a zone east of UTC, where one instant can fall on different local
+    and UTC days; restore the process zone afterwards."""
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = "Europe/Berlin"
+    time.tzset()
+    yield
+    if old is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = old
+    time.tzset()
+
+
+def test_a_job_that_finishes_after_midnight_marks_the_day_it_was_enqueued(
+        gw, monkeypatch):
+    """The guard that admitted the run asked for that day's marker, so the run
+    answers for that day. Observed live on 2026-10-30: the 20:30 evening triage
+    fired under a closed lid, advanced only in the seconds-long dark wakes of a
+    sleeping laptop, and finished at 00:52 — and its marker, stamped with the
+    finishing day, made the real 2026-10-31 fire exit 3. A day's triage lost."""
+    import guard as guard_mod
+    from datetime import datetime, timedelta, timezone
+
+    fired = (datetime.now() - timedelta(days=1)).replace(
+        hour=20, minute=30, second=0, microsecond=0)
+    _enqueue_stamped("evening-triage",
+                     fired.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                     monkeypatch)
+
+    tr.drain(invoker=ok_invoker(), alert=silent, probe=no_probe)  # ends today
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    assert guard_mod.marker_path("evening-triage", fired.strftime("%Y-%m-%d")).exists()
+    assert not guard_mod.marker_path("evening-triage", today).exists()
+    assert guard_mod.guard("evening-triage") == guard_mod.GUARD_OK  # tonight runs
+
+
+def test_marker_writer_and_reader_agree_on_the_local_day(
+        gw, monkeypatch, east_of_utc):
+    """Journal stamps are UTC; markers are keyed by local day. 23:30Z is already
+    the next day east of UTC — the day the guard counted in — so a reader that
+    sliced the stamp (`ts[:10]`) looked one day early, and reconciliation could
+    not find the marker the writer had just left."""
+    import guard as guard_mod
+    from datetime import datetime, timedelta
+
+    utc_day = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+    stamp = f"{utc_day}T23:30:00Z"
+    _enqueue_stamped("night-job", stamp, monkeypatch)
+    tr.drain(invoker=ok_invoker(), alert=silent, probe=no_probe)
+
+    local_day = (datetime.strptime(utc_day, "%Y-%m-%d")
+                 + timedelta(days=1)).strftime("%Y-%m-%d")
+    assert guard_mod.marker_path("night-job", local_day).exists()
+    assert tr._job_marker_exists("night-job", stamp)
 
 
 # --- 2026-08-03 outage: a legacy positive scheduler id poisoned the watermark -

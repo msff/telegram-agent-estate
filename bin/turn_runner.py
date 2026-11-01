@@ -258,9 +258,9 @@ def _now_iso() -> str:
 def _parse_iso(ts):
     """Epoch seconds for a `_now_iso` stamp, or None if it is unusable.
 
-    Returns None rather than raising or defaulting: the only caller is the
-    stuck-entry detector, and a row whose age cannot be established must not be
-    reported as stuck on the strength of a guess."""
+    Returns None rather than raising or defaulting, so each caller picks its own
+    fallback: the stuck-entry detector must not report a row as stuck on the
+    strength of a guessed age, and `_local_day` falls back to today."""
     if not isinstance(ts, str) or not ts:
         return None
     try:
@@ -268,6 +268,19 @@ def _parse_iso(ts):
             tzinfo=timezone.utc).timestamp()
     except ValueError:
         return None
+
+
+def _local_day(ts=None):
+    """The LOCAL calendar day (YYYY-MM-DD) a `_now_iso` stamp falls on; today's
+    if the stamp is missing or unusable.
+
+    Markers are keyed by local day — `guard()` asks for today's marker by the
+    local clock — but journal stamps are UTC. Slicing a stamp (`ts[:10]`) names
+    the UTC day, which is the wrong one for anything journaled between local
+    midnight and the UTC offset."""
+    epoch = _parse_iso(ts)
+    when = datetime.fromtimestamp(epoch) if epoch is not None else datetime.now()
+    return when.strftime("%Y-%m-%d")
 
 
 # --- gateway (non-synced) state root ----------------------------------------
@@ -876,7 +889,7 @@ def run_turn(prompt, head, *, backend=None, invoker=None,
 
 
 def _write_job_marker(group):
-    """Stamp today's completion marker for a scheduler entry that just succeeded.
+    """Stamp the completion marker for a scheduler entry that just succeeded.
 
     The marker is a scheduled job's completion truth: `guard()` reads it to
     refuse a duplicate run, and reconciliation reads it to prove a job finished
@@ -888,6 +901,14 @@ def _write_job_marker(group):
     distinction is not academic: when a conversation is already draining,
     run_job returns `busy` and the in-flight drain does the work, so a marker
     written by run_job would be either a lie or absent depending on timing.
+
+    STAMPED WITH THE DAY THE ENTRY WAS ENQUEUED, not the day the turn ended. The
+    guard that admitted the run asked for that day's marker, so that is the day
+    the run answers for. Observed live on 2026-10-30: the 20:30 evening triage
+    fired under a closed lid, advanced only in the seconds-long dark wakes of a
+    sleeping laptop, and finished at 00:52. Stamped with the finishing day, its
+    marker made the real 2026-10-31 fire exit 3 — a whole day's triage silently
+    skipped, with every log clean.
 
     Reading's digest jobs also write this marker from inside their R20 send
     transaction; re-writing the same path here is idempotent. second-instance's jobs
@@ -910,7 +931,7 @@ def _write_job_marker(group):
             continue
         try:
             import guard as guard_mod
-            path = guard_mod.marker_path(job, datetime.now().strftime("%Y-%m-%d"))
+            path = guard_mod.marker_path(job, _local_day(entry.get("ts")))
             if not path.exists():
                 path.write_text(_now_iso() + "\n", encoding="utf-8")
                 log(f"turn_runner: marked '{job}' complete ({path.name})")
@@ -922,12 +943,13 @@ def _job_marker_exists(job, when_iso=None):
     """Did a scheduled job already complete? The marker is its completion truth
     (the send primitive writes it), so it is the reconciliation evidence for a
     scheduler entry — the send journal is not, because a job may legitimately
-    send nothing to chat."""
+    send nothing to chat. Looked up under the local day `when_iso` falls on,
+    the same day `_write_job_marker` stamps."""
     if not job:
         return False
     try:
         import guard as guard_mod
-        day = (when_iso or "")[:10] or datetime.now().strftime("%Y-%m-%d")
+        day = _local_day(when_iso)
         return guard_mod.marker_path(job, day).exists()
     except Exception:
         return False
