@@ -21,6 +21,7 @@ import fcntl
 import glob
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -35,6 +36,19 @@ def _cfg(cfg=None):
     return cfg if cfg is not None else instance_config.load()
 
 
+# A Bot API token is `<bot id>:<35-char secret>`, and it is part of every Bot API
+# URL: `https://api.telegram.org/bot<token>/sendMessage`. `requests` repeats that
+# URL in its connection errors, so a log line built from such an exception wrote
+# the token into a plain-text log file. Lookarounds rather than `\b`, because the
+# token follows `bot` with no word boundary in between.
+_BOT_TOKEN_RE = re.compile(r"(?<![0-9])[0-9]{8,12}:[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])")
+
+
+def redact_secrets(text):
+    """`text` as a string, with every Telegram bot token replaced by `<redacted>`."""
+    return _BOT_TOKEN_RE.sub("<redacted>", str(text))
+
+
 def log(msg, err=False):
     """Timestamped line to the caller's stdout (the supervisor redirects it).
 
@@ -42,8 +56,11 @@ def log(msg, err=False):
     file, so Python block-buffers it and lines sit unwritten for minutes. A log
     that appears late is worse than no log — it once made a healthy poller look
     dead during an incident.
+
+    Every line goes through `redact_secrets` on the way out, so a caller that
+    formats an exception it never read cannot log a bot token by accident.
     """
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}",
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {redact_secrets(msg)}",
           file=sys.stderr if err else sys.stdout, flush=True)
 
 

@@ -174,3 +174,20 @@ def test_concurrent_appends_do_not_interleave(tmp_path):
 
     rows = ec.read_jsonl(p)                       # raises on any torn line
     assert len(rows) == 20 * 25
+
+
+def test_log_lines_never_carry_a_bot_token(capsys):
+    """The last line of defence behind send's own redaction: whatever a caller
+    formats into a log line, a bot token does not reach the log file."""
+    import poller
+    fake = "1" * 10 + ":" + "A" * 35          # assembled, so the secret scan passes
+    ec.log(f"owner alert failed: ... url: /bot{fake}/sendMessage")
+    poller.log(f"getUpdates failed for bot {fake}", err=True)
+    out = capsys.readouterr()
+    assert fake not in out.out + out.err
+    assert "/bot<redacted>/sendMessage" in out.out
+    assert "bot <redacted>" in out.err
+
+    # and nothing that merely looks numeric is touched
+    line = "reply: message_id=777 -> chat 10000000001 (12 chars): ok"
+    assert ec.redact_secrets(line) == line
