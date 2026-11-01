@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import instance_config
 import msg_index
-from estate_client import load_secrets, log
+from estate_client import load_secrets, log, redact_secrets
 
 _URL_RE = re.compile(r'https?://[^\s<>"]+')
 
@@ -93,8 +93,13 @@ def bot_api_sender(chat_id, text, parse_mode=None, cfg=None, link_label=None):
     if parse_mode == "HTML":
         body["text"] = render_html(text, link_label)
         body["parse_mode"] = "HTML"
-    resp = requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage", json=body, timeout=30)
+    try:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage", json=body, timeout=30)
+    except requests.RequestException as exc:
+        # The exception's text repeats the URL, token included. Re-raise without
+        # it, and `from None`, so no traceback prints the original either.
+        raise SendError(f"sendMessage failed: {redact_secrets(exc)}") from None
     try:
         data = resp.json()
     except ValueError:
